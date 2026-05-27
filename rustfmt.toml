@@ -1,0 +1,72 @@
+# rustfmt.toml
+# 目标：生产环境稳定、可预测、适合 CI 强制检查
+
+# ========================================
+# 基础格式
+# ========================================
+
+max_width = 100
+tab_spaces = 4
+hard_tabs = false
+newline_style = "Unix"
+
+# Rust 语法解析 edition。
+# cargo fmt 通常会从 Cargo.toml 读取 edition；
+# 这里显式声明，保证直接运行 rustfmt 时也一致。
+edition = "2024"
+
+# Rust 2024 格式风格。
+# 建议项目显式写入，避免编辑器 format-on-save 与 CI 结果不一致。
+style_edition = "2024"
+
+# ========================================
+# 宽度启发式
+# ========================================
+
+# Default 会按 max_width 的比例派生 fn_call_width、array_width 等。
+# 为了生产环境可预测，这里同时显式写出关键宽度。
+use_small_heuristics = "Default"
+
+fn_call_width = 60
+attr_fn_like_width = 70
+array_width = 60
+chain_width = 60
+single_line_if_else_max_width = 50
+single_line_let_else_max_width = 50
+struct_lit_width = 18
+struct_variant_width = 35
+short_array_element_width_threshold = 10
+
+# ========================================
+# 导入与模块排序
+# ========================================
+
+# 稳定选项：只做字母序排序，不改变 import 粒度。
+reorder_imports = true
+reorder_modules = true
+imports_granularity = "Item"  # LLM, AI最友好
+group_imports = "StdExternalCrate" # 强制开启全局合并排序
+
+# ========================================
+# 代码结构简化
+# ========================================
+
+merge_derives = true
+use_try_shorthand = true
+use_field_init_shorthand = true
+remove_nested_parens = true
+
+# ========================================
+# 函数与 match 风格
+# ========================================
+
+fn_params_layout = "Tall"
+match_arm_leading_pipes = "Never"
+match_block_trailing_comma = false
+
+# ========================================
+# FFI / ABI
+# ========================================
+
+# 保留 extern "C"，避免 FFI 语义表达变得隐晦。
+force_explicit_abi = true

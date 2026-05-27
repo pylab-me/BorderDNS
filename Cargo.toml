@@ -1,0 +1,72 @@
+[workspace]
+resolver = "2"
+
+members = [
+    "crates/border-dns-types",
+    "crates/border-dns-protocol",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT OR Apache-2.0"
+authors = ["pylab-me"]
+repository = "https://github.com/pylab-me/border-dns"
+description = "BorderDNS Rust runtime: facts-aware DNS governance loop."
+keywords = ["dns", "resolver", "geoip", "routing", "observability"]
+categories = ["network-programming"]
+
+[workspace.dependencies]
+# ─────────────────────────────────────────────────────────────
+# Internal crates
+# ─────────────────────────────────────────────────────────────
+
+border-dns-types = { path = "crates/border-dns-types" }
+border-dns-protocol = { path = "crates/border-dns-protocol" }
+
+# ─────────────────────────────────────────────────────────────
+# Core dependencies
+# ─────────────────────────────────────────────────────────────
+
+bytes = "1"
+thiserror = "2"
+
+# ─────────────────────────────────────────────────────────────
+# Testing
+# ─────────────────────────────────────────────────────────────
+
+pretty_assertions = "1"
+hex = "0.4"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+all = "warn"
+pedantic = "warn"
+nursery = "warn"
+
+# These are too noisy for this project style.
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+too_many_lines = "allow"
+similar_names = "allow"
+
+[profile.dev]
+debug = true
+incremental = true
+
+[profile.test]
+debug = true
+incremental = true
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"

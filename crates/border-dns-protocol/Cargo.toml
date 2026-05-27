@@ -1,0 +1,16 @@
+[package]
+name = "border-dns-protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "DNS protocol wire codec: message decode/encode, name compression, EDNS, SVCB/HTTPS, TCP framing."
+
+[dependencies]
+border-dns-types.workspace = true
+thiserror.workspace = true
+bytes.workspace = true
+
+[lints]
+workspace = true
