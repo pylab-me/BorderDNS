@@ -276,8 +276,6 @@ pub async fn run_doh(cfg: DoHListenerConfig, ctx: Arc<RuntimeContext>) -> anyhow
 
     info!(address = %cfg.listen, path = %cfg.path, "DoH server listening");
 
-    ctx.metrics.https.record_request();
-
     axum_server::bind_rustls(addr, tls_config)
         .serve(app.into_make_service())
         .await
@@ -303,6 +301,7 @@ async fn doh_get_handler(
         )
     })?;
 
+    ctx.metrics.https.record_request();
     let meta = RequestMeta::new(TransportKind::Https, None);
     let resp = handler::handle_dns_query(&query_bytes, &ctx, &meta).await;
     Ok(Bytes::from(resp.to_wire()))
@@ -328,6 +327,7 @@ async fn doh_post_handler(
     let query_bytes = dns_protocol::transport::doh_decode_post(&body)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("invalid DoH body: {e}")))?;
 
+    ctx.metrics.https.record_request();
     let meta = RequestMeta::new(TransportKind::Https, None);
     let resp = handler::handle_dns_query(&query_bytes, &ctx, &meta).await;
     Ok(Bytes::from(resp.to_wire()))
@@ -410,8 +410,6 @@ pub async fn run_doj(cfg: DoJListenerConfig, ctx: Arc<RuntimeContext>) -> anyhow
         "DoJ server listening"
     );
 
-    ctx.metrics.json.record_request();
-
     axum::serve(listener, app.into_make_service())
         .await
         .map_err(|e| anyhow::anyhow!("DoJ server error: {e}"))
@@ -422,6 +420,7 @@ async fn doj_resolve_handler(
     State(ctx): State<Arc<RuntimeContext>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
+    ctx.metrics.json.record_request();
     let name = match params.get("name") {
         Some(n) => n.clone(),
         None => {
@@ -537,7 +536,12 @@ fn rand_id() -> u16 {
     use std::hash::Hasher;
     let s = RandomState::new();
     let mut hasher = s.build_hasher();
-    hasher.write_u64(0);
+    hasher.write_u64(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64,
+    );
     hasher.finish() as u16
 }
 

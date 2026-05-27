@@ -72,10 +72,13 @@ pub fn decode_tcp_frame<'a>(
 
 /// A streaming TCP frame decoder that handles partial reads.
 ///
-/// Feed bytes incrementally via `feed()` and poll via `try_decode()`.
+/// Uses a read cursor (`read_pos`) instead of `drain()` to avoid O(n)
+/// memmove on every decoded frame. The buffer is compacted only when
+/// the consumed region exceeds half the buffer capacity.
 #[derive(Debug)]
 pub struct TcpFrameDecoder {
     buf: Vec<u8>,
+    read_pos: usize,
     max_frame_size: u16,
 }
 
@@ -85,6 +88,7 @@ impl TcpFrameDecoder {
     pub fn new() -> Self {
         Self {
             buf: Vec::with_capacity(4096),
+            read_pos: 0,
             max_frame_size: DEFAULT_MAX_TCP_FRAME,
         }
     }
@@ -94,6 +98,7 @@ impl TcpFrameDecoder {
     pub fn with_max_frame_size(max_frame_size: u16) -> Self {
         Self {
             buf: Vec::with_capacity(4096),
+            read_pos: 0,
             max_frame_size,
         }
     }
@@ -110,11 +115,15 @@ impl TcpFrameDecoder {
     ///
     /// The returned `Vec<u8>` is an owned copy of the DNS message bytes.
     pub fn try_decode(&mut self) -> Result<Option<(Vec<u8>, usize)>, ProtocolError> {
-        if self.buf.len() < 2 {
+        let available = self.buf.len() - self.read_pos;
+
+        if available < 2 {
             return Ok(None);
         }
 
-        let length = u16::from_be_bytes([self.buf[0], self.buf[1]]) as usize;
+        let header_start = self.read_pos;
+        let length =
+            u16::from_be_bytes([self.buf[header_start], self.buf[header_start + 1]]) as usize;
 
         if length > self.max_frame_size as usize {
             return Err(ProtocolError::TcpFrameTooLarge {
@@ -124,28 +133,34 @@ impl TcpFrameDecoder {
         }
 
         let total = 2 + length;
-        if self.buf.len() < total {
+        if available < total {
             return Ok(None);
         }
 
-        let message = self.buf[2..total].to_vec();
-        let consumed = total;
+        // Copy message bytes out (skip the 2-byte length prefix).
+        let message = self.buf[header_start + 2..header_start + total].to_vec();
+        self.read_pos += total;
 
-        // Consume the frame from the buffer.
-        self.buf.drain(..total);
+        // Compact: if we've consumed more than half the buffer, memmove the
+        // remainder to the front. This amortises the copy cost.
+        if self.read_pos > 0 && self.read_pos >= self.buf.len() / 2 {
+            self.buf.drain(..self.read_pos);
+            self.read_pos = 0;
+        }
 
-        Ok(Some((message, consumed)))
+        Ok(Some((message, total)))
     }
 
     /// Reset the internal buffer, discarding any buffered data.
     pub fn reset(&mut self) {
         self.buf.clear();
+        self.read_pos = 0;
     }
 
-    /// Number of bytes currently buffered.
+    /// Number of bytes currently buffered (including already-consumed bytes).
     #[must_use]
     pub fn buffered(&self) -> usize {
-        self.buf.len()
+        self.buf.len() - self.read_pos
     }
 }
 

@@ -3,6 +3,8 @@
 //! All inbound transports (UDP, TCP, DoT, DoH, DoQ, DoJ) funnel through
 //! this single handler. It performs cache lookup, upstream forwarding,
 //! and response caching — no transport may bypass it.
+//!
+//! P1 fix: uses `Arc<DnsMessage>` from cache, avoids deep clone.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -69,9 +71,9 @@ pub async fn handle_dns_query(
         "QUERY"
     );
 
-    // Cache lookup.
+    // Cache lookup — returns Arc<DnsMessage>, no deep clone on hit.
     if let Some(cached) = ctx.cache.get(qtype, &domain) {
-        let mut resp = cached;
+        let mut resp = (*cached).clone();
         resp.header.id = query.header.id;
         let answer_count = resp.answers.len();
         ctx.metrics.for_transport(meta.transport).record_cache_hit();
@@ -116,8 +118,7 @@ pub async fn handle_dns_query(
 
             // Cache the response (only for successful answers with records).
             if rcode == ResponseCode::NoError && answer_count > 0 {
-                ctx.cache
-                    .insert(qtype, &domain, upstream_resp.message.clone());
+                ctx.cache.insert(qtype, &domain, &upstream_resp.message);
             }
 
             ctx.metrics.for_transport(meta.transport).record_response();

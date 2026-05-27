@@ -1,38 +1,53 @@
 //! DNS TTL cache with basic metrics.
 //!
-//! Sprint 1 cache is simple: `qtype + domain` as cache key.
+//! Sprint 1 cache: `qtype + domain` as cache key.
 //! Route-scoped cache is Sprint 2.
+//!
+//! P1 fixes applied:
+//! - Cache stores `Arc<DnsMessage>` to avoid deep clone on every hit.
+//! - `CacheKey` stores a single inline byte buffer instead of `Vec<Vec<u8>>`.
 
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Instant;
 
+use border_dns_config::CacheConfig;
 use dashmap::DashMap;
 use dns_protocol::message::DnsMessage;
 use dns_protocol::name::DomainName;
 use dns_types::QType;
 
+// ─── Cache key ───────────────────────────────────────────────────
+
 /// Cache key: combined qtype + domain name.
+///
+/// Domain labels are stored as a single contiguous byte buffer with
+/// length-prefix per label — one heap allocation instead of N.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct CacheKey {
-    /// Query type.
     qtype: QType,
-    /// Domain name (labels).
-    labels: Vec<Vec<u8>>,
+    /// Flattened domain labels: [len0, label0_bytes, len1, label1_bytes, ...]
+    name_bytes: Vec<u8>,
 }
 
 impl CacheKey {
     fn new(qtype: QType, name: &DomainName) -> Self {
-        Self {
-            qtype,
-            labels: name.labels().map(|l| l.to_vec()).collect(),
+        let mut name_bytes = Vec::new();
+        for label in name.labels() {
+            name_bytes.push(label.len() as u8);
+            name_bytes.extend_from_slice(label);
         }
+        Self { qtype, name_bytes }
     }
 }
+
+// ─── Cache entry ─────────────────────────────────────────────────
 
 /// A cached DNS response entry.
 #[derive(Debug, Clone)]
 struct CacheEntry {
-    /// The DNS response message.
-    message: DnsMessage,
+    /// The DNS response message, shared via Arc to avoid clone on every hit.
+    message: Arc<DnsMessage>,
     /// When this entry was stored.
     inserted_at: Instant,
     /// Effective TTL in seconds (clamped between min_ttl and max_ttl).
@@ -40,46 +55,28 @@ struct CacheEntry {
 }
 
 impl CacheEntry {
-    /// Whether this entry has expired.
     fn is_expired(&self) -> bool {
         self.inserted_at.elapsed().as_secs() >= u64::from(self.ttl_secs)
     }
 }
 
-/// Cache statistics.
+// ─── Cache stats ─────────────────────────────────────────────────
+
+/// Cache statistics (returned to callers).
 #[derive(Debug, Clone, Default)]
 pub struct CacheStats {
-    /// Total cache hits.
     pub hits: u64,
-    /// Total cache misses.
     pub misses: u64,
-    /// Total entries evicted (expired or capacity).
     pub evictions: u64,
-    /// Current number of entries.
     pub entries: usize,
 }
 
-/// DNS response cache.
-///
-/// Thread-safe via `DashMap`. Supports TTL-based expiration.
-#[derive(Debug)]
-pub struct DnsCache {
-    entries: DashMap<CacheKey, CacheEntry>,
-    stats: CacheMetrics,
-    config: CacheConfig,
-}
-
-/// Internal metrics counters.
 #[derive(Debug, Default)]
 struct CacheMetrics {
     hits: std::sync::atomic::AtomicU64,
     misses: std::sync::atomic::AtomicU64,
     evictions: std::sync::atomic::AtomicU64,
 }
-
-use std::sync::atomic::Ordering;
-
-use border_dns_config::CacheConfig;
 
 impl CacheMetrics {
     fn record_hit(&self) {
@@ -95,6 +92,19 @@ impl CacheMetrics {
     }
 }
 
+// ─── DnsCache ────────────────────────────────────────────────────
+
+/// DNS response cache.
+///
+/// Thread-safe via `DashMap`. Supports TTL-based expiration.
+/// Returns `Arc<DnsMessage>` to avoid clone on cache hit.
+#[derive(Debug)]
+pub struct DnsCache {
+    entries: DashMap<CacheKey, CacheEntry>,
+    stats: CacheMetrics,
+    config: CacheConfig,
+}
+
 impl DnsCache {
     /// Create a new cache with the given configuration.
     #[must_use]
@@ -108,8 +118,10 @@ impl DnsCache {
 
     /// Look up a cached response for the given query.
     ///
-    /// Returns `Some(message)` if a valid (non-expired) entry exists.
-    pub fn get(&self, qtype: QType, name: &DomainName) -> Option<DnsMessage> {
+    /// Returns `Some(Arc<DnsMessage>)` if a valid (non-expired) entry exists.
+    /// The caller can cheaply clone the Arc or call `Arc::make_mut` if mutation
+    /// is needed (e.g., patching the header ID).
+    pub fn get(&self, qtype: QType, name: &DomainName) -> Option<Arc<DnsMessage>> {
         let key = CacheKey::new(qtype, name);
         if let Some(entry) = self.entries.get(&key) {
             if entry.is_expired() {
@@ -120,7 +132,7 @@ impl DnsCache {
             }
             self.stats.record_hit();
             tracing::trace!(qtype = ?qtype, domain = %name, "cache hit");
-            Some(entry.message.clone())
+            Some(Arc::clone(&entry.message))
         } else {
             self.stats.record_miss();
             None
@@ -130,13 +142,14 @@ impl DnsCache {
     /// Insert a DNS response into the cache.
     ///
     /// The TTL is extracted from the first answer record, clamped
-    /// between `min_ttl` and `max_ttl`. The answer record TTLs in
-    /// the stored message are also updated to the clamped value.
-    pub fn insert(&self, qtype: QType, name: &DomainName, mut message: DnsMessage) {
-        let ttl = self.clamp_ttl(extract_min_ttl(&message));
+    /// between `min_ttl` and `max_ttl`. A clone of the message is
+    /// stored wrapped in `Arc` so future `get()` calls avoid deep copies.
+    pub fn insert(&self, qtype: QType, name: &DomainName, message: &DnsMessage) {
+        let ttl = self.clamp_ttl(extract_min_ttl(message));
 
-        // Update answer record TTLs to the clamped value.
-        for rr in &mut message.answers {
+        // Clone message once and patch TTLs.
+        let mut stored = message.clone();
+        for rr in &mut stored.answers {
             rr.ttl = ttl;
         }
 
@@ -147,7 +160,7 @@ impl DnsCache {
 
         let key = CacheKey::new(qtype, name);
         let entry = CacheEntry {
-            message,
+            message: Arc::new(stored),
             inserted_at: Instant::now(),
             ttl_secs: ttl,
         };
@@ -161,12 +174,10 @@ impl DnsCache {
     }
 
     /// Insert a negative cache entry (NXDOMAIN, SERVFAIL, etc.).
-    ///
-    /// Uses the configured negative TTL.
-    pub fn insert_negative(&self, qtype: QType, name: &DomainName, message: DnsMessage) {
+    pub fn insert_negative(&self, qtype: QType, name: &DomainName, message: &DnsMessage) {
         let key = CacheKey::new(qtype, name);
         let entry = CacheEntry {
-            message,
+            message: Arc::new(message.clone()),
             inserted_at: Instant::now(),
             ttl_secs: self.config.negative_ttl_secs,
         };
@@ -266,7 +277,7 @@ mod tests {
 
         // Insert.
         let resp = make_test_response("example.com", Ipv4Addr::new(1, 2, 3, 4), 300);
-        cache.insert(qtype, &name, resp.clone());
+        cache.insert(qtype, &name, &resp);
 
         // Hit.
         let cached = cache.get(qtype, &name).unwrap();
@@ -287,7 +298,7 @@ mod tests {
 
         // TTL below min should be clamped to min.
         let resp = make_test_response("example.com", Ipv4Addr::new(1, 2, 3, 4), 1);
-        cache.insert(qtype, &name, resp);
+        cache.insert(qtype, &name, &resp);
 
         let cached = cache.get(qtype, &name).unwrap();
         assert_eq!(cached.answers[0].ttl, 10);
@@ -304,7 +315,7 @@ mod tests {
         let qtype = QType::Type(RecordType::A);
 
         let resp = make_test_response("nonexistent.example.com", Ipv4Addr::new(0, 0, 0, 0), 0);
-        cache.insert_negative(qtype, &name, resp);
+        cache.insert_negative(qtype, &name, &resp);
 
         // Should be in cache.
         assert!(cache.get(qtype, &name).is_some());
@@ -318,10 +329,26 @@ mod tests {
         let qtype = QType::Type(RecordType::A);
 
         let resp = make_test_response("example.com", Ipv4Addr::new(1, 2, 3, 4), 300);
-        cache.insert(qtype, &name, resp);
+        cache.insert(qtype, &name, &resp);
         assert!(cache.get(qtype, &name).is_some());
 
         cache.clear();
         assert!(cache.get(qtype, &name).is_none());
+    }
+
+    #[test]
+    fn test_cache_returns_arc_no_deep_clone() {
+        let config = CacheConfig::default();
+        let cache = DnsCache::new(config);
+        let name = DomainName::from_str("example.com").unwrap();
+        let qtype = QType::Type(RecordType::A);
+
+        let resp = make_test_response("example.com", Ipv4Addr::new(1, 2, 3, 4), 300);
+        cache.insert(qtype, &name, &resp);
+
+        let cached1 = cache.get(qtype, &name).unwrap();
+        let cached2 = cache.get(qtype, &name).unwrap();
+        // Both should point to the same Arc allocation.
+        assert!(Arc::ptr_eq(&cached1, &cached2));
     }
 }

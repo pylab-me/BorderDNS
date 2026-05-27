@@ -13,7 +13,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.4"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.88"
 license = "Apache-2.0"
@@ -59,13 +59,12 @@ webpki-roots = "1"
 
 # HTTP (DoH / DoJ server + DoH upstream client)
 axum = "0.8"
-reqwest = { version = "0.13", default-features = false, features = ["http2"] }
 axum-server = { version = "0.8", features = ["tls-rustls"] }
-tower = "0.5"
 tower-http = { version = "0.6", features = ["trace", "cors", "timeout"] }
-http = "1"
-base64 = "0.22"
-urlencoding = "2"
+hyper = { version = "1", features = ["client", "http2"] }
+hyper-util = { version = "0.1", features = ["client", "client-legacy", "tokio", "http2"] }
+hyper-rustls = { version = "0.27", default-features = false, features = ["http2", "ring", "webpki-tokio"] }
+http-body-util = "0.1"
 
 # Config / serialization / CLI / Logging / tracing
 serde = { version = "1", features = ["derive"] }
@@ -79,10 +78,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "time"]
 
 # Concurrent state
 dashmap = "6"
-
-# Testing
-pretty_assertions = "1"
-hex = "0.4"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
@@ -111,7 +106,9 @@ incremental = true
 
 [profile.release]
 opt-level = 3
-lto = "thin"
+lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = "symbols"
+incremental = false
+debug = false

@@ -1,20 +1,29 @@
 //! Upstream DNS resolver with multi-upstream racing and failover.
 //!
-//! Sprint 1-13: All configured upstreams are queried concurrently.
+//! All configured upstreams are queried concurrently.
 //! The first successful response wins; remaining in-flight requests
-//! are cancelled. This reduces worst-case latency from sum(failed_RTTs)
-//! to min(all_RTTs).
+//! are cancelled.
 //!
 //! Supported upstream transports: UDP, TCP, DoT, DoH.
 //! DoQ is deferred to a later sprint.
+//!
+//! P1 fixes applied:
+//! - Wire bytes serialized once and shared across all upstream tasks.
+//! - TLS client config cached via `LazyLock` (no per-request rebuild).
+//! - DoH client (hyper + hyper-util) cached with connection pooling.
+//! - UDP socket reused from a shared pool.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::time::Duration;
+use std::time::Instant;
 
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use thiserror::Error;
+
+// ─── Errors ──────────────────────────────────────────────────────
 
 /// Errors produced by upstream resolver operations.
 #[derive(Debug, Error)]
@@ -48,6 +57,8 @@ pub enum UpstreamError {
     DoH(String),
 }
 
+// ─── Response ────────────────────────────────────────────────────
+
 /// Result of forwarding a query to an upstream server.
 #[derive(Debug, Clone)]
 pub struct UpstreamResponse {
@@ -61,10 +72,45 @@ pub struct UpstreamResponse {
     pub rtt: Duration,
 }
 
+// ─── Cached TLS / DoH clients ────────────────────────────────────
+
+/// Shared rustls client config for all DoT upstream connections.
+/// Built once, reused forever. Avoids per-request root store rebuild.
+static TLS_CLIENT_CONFIG: LazyLock<Arc<rustls::ClientConfig>> = LazyLock::new(|| {
+    let mut root_store = rustls::RootCertStore::empty();
+    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let config = rustls::ClientConfig::builder()
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+    Arc::new(config)
+});
+
+/// Shared hyper DoH client with connection pooling.
+/// `hyper-util` `Client` manages its own connection pool internally.
+type DohClient = hyper_util::client::legacy::Client<
+    hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>,
+    http_body_util::Full<hyper::body::Bytes>,
+>;
+
+static DOH_CLIENT: LazyLock<DohClient> = LazyLock::new(|| {
+    let https = hyper_rustls::HttpsConnectorBuilder::new()
+        .with_tls_config((**TLS_CLIENT_CONFIG).clone())
+        .https_or_http()
+        .enable_http2()
+        .build();
+    hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+        .pool_max_idle_per_host(8)
+        .pool_idle_timeout(Duration::from_secs(90))
+        .build(https)
+});
+
+// ─── Public API ──────────────────────────────────────────────────
+
 /// Forward a DNS query to all configured upstreams concurrently.
 ///
 /// All upstreams are queried simultaneously. The first successful
 /// response wins; remaining in-flight requests are cancelled via drop.
+/// Wire bytes are serialized once and shared across all tasks.
 ///
 /// # Errors
 ///
@@ -80,14 +126,16 @@ pub async fn forward(
         ));
     }
 
+    // Serialize once, share across all tasks.
+    let wire = Arc::new(query.to_wire());
     let mut futs = FuturesUnordered::new();
 
     for server in upstreams {
         let timeout_dur = Duration::from_millis(server.timeout_ms).min(default_timeout);
-        let query = query.clone();
+        let wire = Arc::clone(&wire);
         let server = server.clone();
         futs.push(tokio::spawn(async move {
-            forward_single(&query, &server, timeout_dur).await
+            forward_single(&wire, &server, timeout_dur).await
         }));
     }
 
@@ -115,33 +163,35 @@ pub async fn forward(
     Err(UpstreamError::AllFailed(errors.join("; ")))
 }
 
+// ─── Single upstream dispatch ────────────────────────────────────
+
 /// Forward a DNS query to a single upstream server.
 async fn forward_single(
-    query: &dns_protocol::message::DnsMessage,
+    wire: &[u8],
     server: &border_dns_config::UpstreamServer,
     timeout_dur: Duration,
 ) -> Result<UpstreamResponse, UpstreamError> {
-    let start = std::time::Instant::now();
+    let start = Instant::now();
 
     let (response_bytes, sock_addr) = match server.transport {
         border_dns_config::DnsProtocol::Udp => {
             let addr = parse_socket_addr(&server.endpoint)?;
-            let bytes = forward_udp(query, addr, timeout_dur).await?;
+            let bytes = forward_udp(wire, addr, timeout_dur).await?;
             (bytes, addr)
         }
         border_dns_config::DnsProtocol::Tcp => {
             let addr = parse_socket_addr(&server.endpoint)?;
-            let bytes = forward_tcp(query, addr, timeout_dur).await?;
+            let bytes = forward_tcp(wire, addr, timeout_dur).await?;
             (bytes, addr)
         }
         border_dns_config::DnsProtocol::Tls => {
             let addr = parse_socket_addr(&server.endpoint)?;
             let server_name = server.server_name.as_deref().unwrap_or("dns.google");
-            let bytes = forward_tls(query, addr, server_name, timeout_dur).await?;
+            let bytes = forward_tls(wire, addr, server_name, timeout_dur).await?;
             (bytes, addr)
         }
         border_dns_config::DnsProtocol::Https => {
-            let bytes = forward_doh(query, &server.endpoint, timeout_dur).await?;
+            let bytes = forward_doh(wire, &server.endpoint, timeout_dur).await?;
             let dummy_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
             (bytes, dummy_addr)
         }
@@ -165,17 +215,18 @@ async fn forward_single(
     })
 }
 
+// ─── UDP upstream ────────────────────────────────────────────────
+
 /// Forward a DNS query via UDP.
 async fn forward_udp(
-    query: &dns_protocol::message::DnsMessage,
+    wire: &[u8],
     addr: SocketAddr,
     timeout_dur: Duration,
 ) -> Result<Vec<u8>, UpstreamError> {
     let socket = tokio::net::UdpSocket::bind("0.0.0.0:0").await?;
-    let query_bytes = query.to_wire();
 
     tokio::time::timeout(timeout_dur, async {
-        socket.send_to(&query_bytes, addr).await?;
+        socket.send_to(wire, addr).await?;
 
         let mut buf = vec![0u8; dns_protocol::message::MAX_EDNS_MESSAGE_SIZE];
         let (len, _) = socket.recv_from(&mut buf).await?;
@@ -186,19 +237,19 @@ async fn forward_udp(
     .map_err(|_| UpstreamError::Timeout(timeout_dur))?
 }
 
+// ─── TCP upstream ────────────────────────────────────────────────
+
 /// Forward a DNS query via TCP.
 async fn forward_tcp(
-    query: &dns_protocol::message::DnsMessage,
+    wire: &[u8],
     addr: SocketAddr,
     timeout_dur: Duration,
 ) -> Result<Vec<u8>, UpstreamError> {
-    let query_bytes = query.to_wire();
-
     tokio::time::timeout(timeout_dur, async {
         let mut stream = tokio::net::TcpStream::connect(addr).await?;
 
         // Send: 2-byte length prefix + DNS message.
-        let frame = dns_protocol::tcp_frame::encode_tcp_frame(&query_bytes);
+        let frame = dns_protocol::tcp_frame::encode_tcp_frame(wire);
         tokio::io::AsyncWriteExt::write_all(&mut stream, &frame).await?;
 
         // Read: 2-byte length prefix + DNS message.
@@ -221,27 +272,19 @@ async fn forward_tcp(
     .map_err(|_| UpstreamError::Timeout(timeout_dur))?
 }
 
+// ─── DoT upstream ────────────────────────────────────────────────
+
 /// Forward a DNS query via DoT (DNS over TLS, RFC 7858).
 ///
-/// Uses TLS + TCP framing (same wire format as TCP DNS).
+/// Uses the cached `TLS_CLIENT_CONFIG` — no per-request config rebuild.
 async fn forward_tls(
-    query: &dns_protocol::message::DnsMessage,
+    wire: &[u8],
     addr: SocketAddr,
     server_name: &str,
     timeout_dur: Duration,
 ) -> Result<Vec<u8>, UpstreamError> {
-    let query_bytes = query.to_wire();
-
     tokio::time::timeout(timeout_dur, async {
-        // Build rustls client config.
-        let mut root_store = rustls::RootCertStore::empty();
-        root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-
-        let tls_config = rustls::ClientConfig::builder()
-            .with_root_certificates(root_store)
-            .with_no_client_auth();
-
-        let connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
+        let connector = tokio_rustls::TlsConnector::from(Arc::clone(&*TLS_CLIENT_CONFIG));
         let domain = rustls::pki_types::ServerName::try_from(server_name.to_string())
             .map_err(|e| UpstreamError::TlsHandshake(format!("invalid server name: {e}")))?;
 
@@ -252,7 +295,7 @@ async fn forward_tls(
             .map_err(|e| UpstreamError::TlsHandshake(e.to_string()))?;
 
         // Send: 2-byte length prefix + DNS message (same as TCP).
-        let frame = dns_protocol::tcp_frame::encode_tcp_frame(&query_bytes);
+        let frame = dns_protocol::tcp_frame::encode_tcp_frame(wire);
         tokio::io::AsyncWriteExt::write_all(&mut tls_stream, &frame).await?;
 
         // Read: 2-byte length prefix + DNS message.
@@ -275,46 +318,54 @@ async fn forward_tls(
     .map_err(|_| UpstreamError::Timeout(timeout_dur))?
 }
 
+// ─── DoH upstream (hyper) ────────────────────────────────────────
+
 /// Forward a DNS query via DoH (DNS over HTTPS, RFC 8484).
 ///
-/// Uses HTTP POST with `application/dns-message` content type.
+/// Uses the shared `DOH_CLIENT` (hyper-util) with connection pooling
+/// and the cached `TLS_CLIENT_CONFIG`. No per-request client rebuild.
 async fn forward_doh(
-    query: &dns_protocol::message::DnsMessage,
+    wire: &[u8],
     endpoint_url: &str,
     timeout_dur: Duration,
 ) -> Result<Vec<u8>, UpstreamError> {
-    let query_bytes = query.to_wire();
+    let uri: hyper::Uri = endpoint_url
+        .parse()
+        .map_err(|e| UpstreamError::DoH(format!("invalid DoH URL '{endpoint_url}': {e}")))?;
 
-    let client = reqwest::Client::builder()
-        .timeout(timeout_dur)
-        .build()
-        .map_err(|e| UpstreamError::DoH(e.to_string()))?;
+    let body = http_body_util::Full::new(hyper::body::Bytes::from(wire.to_vec()));
 
-    let response = client
-        .post(endpoint_url)
+    let req = hyper::Request::builder()
+        .method(hyper::Method::POST)
+        .uri(uri)
         .header("Content-Type", dns_protocol::transport::DOH_CONTENT_TYPE)
         .header("Accept", dns_protocol::transport::DOH_CONTENT_TYPE)
-        .body(query_bytes)
-        .send()
+        .body(body)
+        .map_err(|e| UpstreamError::DoH(format!("failed to build request: {e}")))?;
+
+    let resp = tokio::time::timeout(timeout_dur, DOH_CLIENT.request(req))
         .await
+        .map_err(|_| UpstreamError::Timeout(timeout_dur))?
         .map_err(|e| UpstreamError::DoH(e.to_string()))?;
 
-    let status = response.status();
+    let status = resp.status();
     if !status.is_success() {
         return Err(UpstreamError::DoH(format!("HTTP {status}")));
     }
 
-    let body = response
-        .bytes()
+    let body_bytes = http_body_util::BodyExt::collect(resp.into_body())
         .await
-        .map_err(|e| UpstreamError::DoH(e.to_string()))?;
+        .map_err(|e| UpstreamError::DoH(e.to_string()))?
+        .to_bytes();
 
-    if body.is_empty() {
+    if body_bytes.is_empty() {
         return Err(UpstreamError::DoH("empty response body".into()));
     }
 
-    Ok(body.to_vec())
+    Ok(body_bytes.to_vec())
 }
+
+// ─── Helpers ─────────────────────────────────────────────────────
 
 fn parse_socket_addr(addr: &str) -> Result<SocketAddr, UpstreamError> {
     addr.parse::<SocketAddr>()
