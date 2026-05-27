@@ -136,7 +136,13 @@ pub async fn handle_dns_query(
     // Forward to upstream.
     let timeout_dur = Duration::from_millis(ctx.config.server.default_timeout_ms);
 
-    match border_dns_upstream::forward(&query, &ctx.config.upstreams.default, timeout_dur).await {
+    match border_dns_upstream::forward(
+        &query,
+        ctx.config.upstreams.default_upstreams(),
+        timeout_dur,
+    )
+    .await
+    {
         Ok(upstream_resp) => {
             let elapsed = total_start.elapsed();
             let rcode = upstream_resp.message.header.rcode;

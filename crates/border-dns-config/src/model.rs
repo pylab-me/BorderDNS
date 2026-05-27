@@ -78,12 +78,27 @@ impl Config {
         }
 
         // Validate upstreams.
-        if self.upstreams.default.is_empty() {
+        //
+        // Route-aware mode: `bootstrap` must be non-empty (china/foreign optional).
+        // Simple mode: `default` must be non-empty.
+        // At least one of these two must be present.
+        if self.upstreams.bootstrap.is_empty() && self.upstreams.default.is_empty() {
             return Err(ConfigError::Validation(
-                "at least one default upstream is required".into(),
+                "no upstream servers configured; please configure `bootstrap` (route-aware mode) \
+                 or `default` (simple mode) under [upstreams]"
+                    .into(),
             ));
         }
+        for server in &self.upstreams.bootstrap {
+            server.validate()?;
+        }
         for server in &self.upstreams.default {
+            server.validate()?;
+        }
+        for server in &self.upstreams.china {
+            server.validate()?;
+        }
+        for server in &self.upstreams.foreign {
             server.validate()?;
         }
 
@@ -258,12 +273,20 @@ pub struct DoJListenerConfig {
 
 /// Upstream resolver group configuration.
 ///
-/// Supports named upstream groups: `default`, `china`, `foreign`.
-/// Route-aware pipeline selects the upstream group based on the
-/// execution route for each query.
+/// Supports named upstream groups: `bootstrap`, `default`, `china`, `foreign`.
+///
+/// - **Route-aware mode**: configure `bootstrap` (required) + optional `china`/`foreign`.
+/// - **Simple mode**: configure `default` (no route governance).
+///
+/// At least one of `bootstrap` or `default` must be non-empty for the
+/// configuration to be valid.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpstreamGroupConfig {
-    /// Default upstream servers (fallback for all routes).
+    /// Bootstrap upstream servers (used for initial / fallback resolution
+    /// in route-aware mode).
+    #[serde(default)]
+    pub bootstrap: Vec<UpstreamServer>,
+    /// Default upstream servers (simple mode, no route governance).
     #[serde(default)]
     pub default: Vec<UpstreamServer>,
     /// China-specific upstream servers (used when route = China).
@@ -277,19 +300,41 @@ pub struct UpstreamGroupConfig {
 impl UpstreamGroupConfig {
     /// Get upstream servers for a given route.
     ///
-    /// Falls back to `default` if the route-specific group is empty.
+    /// Priority: route-specific group → bootstrap → default.
     #[must_use]
     pub fn for_route(&self, route: dns_types::Route) -> &[UpstreamServer] {
         let group = match route {
             dns_types::Route::China => &self.china,
             dns_types::Route::Foreign => &self.foreign,
-            dns_types::Route::Bootstrap | dns_types::Route::Fallback => &self.default,
+            dns_types::Route::Bootstrap | dns_types::Route::Fallback => &self.bootstrap,
         };
-        if group.is_empty() {
+        if !group.is_empty() {
+            return group;
+        }
+        // Fallback chain: bootstrap → default.
+        if !self.bootstrap.is_empty() {
+            &self.bootstrap
+        } else {
+            &self.default
+        }
+    }
+
+    /// Get the upstream servers for Sprint 1 (no route governance).
+    ///
+    /// Returns `default` if non-empty, otherwise falls back to `bootstrap`.
+    #[must_use]
+    pub fn default_upstreams(&self) -> &[UpstreamServer] {
+        if !self.default.is_empty() {
             &self.default
         } else {
-            group
+            &self.bootstrap
         }
+    }
+
+    /// Whether the configuration uses route-aware mode (bootstrap is configured).
+    #[must_use]
+    pub fn is_route_aware(&self) -> bool {
+        !self.bootstrap.is_empty()
     }
 }
 
@@ -798,6 +843,88 @@ listen = "0.0.0.0:5353"
 
 [upstreams]
 default = []
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_config_bootstrap_only() {
+        let toml_str = r#"
+[server]
+
+[listeners.udp]
+enabled = true
+listen = "0.0.0.0:5353"
+
+[[upstreams.bootstrap]]
+name = "alidns"
+endpoint = "223.5.5.5:53"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(config.validate().is_ok());
+        assert!(config.upstreams.is_route_aware());
+        assert_eq!(config.upstreams.bootstrap.len(), 1);
+        assert!(config.upstreams.default.is_empty());
+    }
+
+    #[test]
+    fn test_config_default_only() {
+        let toml_str = r#"
+[server]
+
+[listeners.udp]
+enabled = true
+listen = "0.0.0.0:5353"
+
+[[upstreams.default]]
+name = "alidns"
+endpoint = "223.5.5.5:53"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(config.validate().is_ok());
+        assert!(!config.upstreams.is_route_aware());
+        assert_eq!(config.upstreams.default_upstreams().len(), 1);
+    }
+
+    #[test]
+    fn test_config_bootstrap_with_china_foreign() {
+        let toml_str = r#"
+[server]
+
+[listeners.udp]
+enabled = true
+listen = "0.0.0.0:5353"
+
+[[upstreams.bootstrap]]
+name = "bootstrap"
+endpoint = "223.5.5.5:53"
+
+[[upstreams.china]]
+name = "alidns"
+endpoint = "223.5.5.5:53"
+
+[[upstreams.foreign]]
+name = "cloudflare"
+endpoint = "1.1.1.1:53"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(config.validate().is_ok());
+        assert!(config.upstreams.is_route_aware());
+    }
+
+    #[test]
+    fn test_config_no_bootstrap_no_default_rejected() {
+        let toml_str = r#"
+[server]
+
+[listeners.udp]
+enabled = true
+listen = "0.0.0.0:5353"
+
+[[upstreams.china]]
+name = "alidns"
+endpoint = "223.5.5.5:53"
 "#;
         let config: Config = toml::from_str(toml_str).unwrap();
         assert!(config.validate().is_err());

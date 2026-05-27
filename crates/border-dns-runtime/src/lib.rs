@@ -140,7 +140,7 @@ pub async fn run(config: Config, verbose: bool) -> anyhow::Result<()> {
     }
 
     info!(
-        upstreams = ?ctx.config.upstreams.default.len(),
+        upstreams = ?ctx.config.upstreams.default_upstreams().len(),
         cache_max = ctx.config.cache.max_entries,
         "configuration loaded"
     );
