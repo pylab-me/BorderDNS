@@ -1,7 +1,7 @@
-use border_dns_facts::DomainGovernanceState;
-use border_dns_facts::GovernancePhase;
-use border_dns_facts::GovernanceThresholds;
-use border_dns_facts::ThirdPartyMode;
+use facts::DomainGovernanceState;
+use facts::GovernancePhase;
+use facts::GovernanceThresholds;
+use facts::ThirdPartyMode;
 
 use super::*;
 

@@ -1,9 +1,9 @@
-use border_dns_facts::CnameScope;
-use border_dns_facts::DomainIntent;
-use border_dns_facts::EvidenceStrength;
-use border_dns_facts::FactStatus;
-use border_dns_facts::GovernancePhase;
-use border_dns_facts::TlsIdentityStatus;
+use facts::CnameScope;
+use facts::DomainIntent;
+use facts::EvidenceStrength;
+use facts::FactStatus;
+use facts::GovernancePhase;
+use facts::TlsIdentityStatus;
 
 use super::*;
 

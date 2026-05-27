@@ -30,19 +30,19 @@ keywords = ["dns", "resolver", "geoip", "routing", "observability"]
 categories = ["network-programming"]
 
 [workspace.dependencies]
-# Internal crates
+# Internal crates (aliased for cleaner imports)
 dns-types = { path = "crates/dns-types" }
 dns-protocol = { path = "crates/dns-protocol" }
 dns-transport = { path = "crates/dns-transport" }
-border-dns-config = { path = "crates/border-dns-config" }
-border-dns-cache = { path = "crates/border-dns-cache" }
+runtime-config = { package = "border-dns-config", path = "crates/border-dns-config" }
+route-cache = { package = "border-dns-cache", path = "crates/border-dns-cache" }
 border-dns-upstream = { path = "crates/border-dns-upstream" }
 border-dns-runtime = { path = "crates/border-dns-runtime" }
-border-dns-domain-knowledge = { path = "crates/border-dns-domain-knowledge" }
-border-dns-geoip = { path = "crates/border-dns-geoip" }
-border-dns-route-policy = { path = "crates/border-dns-route-policy" }
+domain-knowledge = { package = "border-dns-domain-knowledge", path = "crates/border-dns-domain-knowledge" }
+geoip = { package = "border-dns-geoip", path = "crates/border-dns-geoip" }
+route-policy = { package = "border-dns-route-policy", path = "crates/border-dns-route-policy" }
 border-dns-pipeline = { path = "crates/border-dns-pipeline" }
-border-dns-facts = { path = "crates/border-dns-facts" }
+facts = { package = "border-dns-facts", path = "crates/border-dns-facts" }
 border-dns-probes = { path = "crates/border-dns-probes" }
 
 # Core dependencies

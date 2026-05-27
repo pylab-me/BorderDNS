@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use border_dns_cache::DnsCache;
-use border_dns_config::Config;
-use border_dns_domain_knowledge::BuiltInDomainKnowledge;
-use border_dns_geoip::SimpleGeoIp;
+use domain_knowledge::BuiltInDomainKnowledge;
+use geoip::SimpleGeoIp;
+use route_cache::DnsCache;
+use runtime_config::Config;
 
 use super::Pipeline;
 
@@ -19,7 +19,7 @@ listen = "0.0.0.0:5353"
 name = "test"
 endpoint = "223.5.5.5:53"
 "#;
-    border_dns_config::load_from_str(toml_str).unwrap()
+    runtime_config::load_from_str(toml_str).unwrap()
 }
 
 /// Build a minimal DNS query wire message for the given domain and qtype.
@@ -71,7 +71,7 @@ ttl_secs = 120
 domain = "blocked.local"
 ips = ["1.2.3.4"]
 "#;
-    let config = Arc::new(border_dns_config::load_from_str(toml_str).unwrap());
+    let config = Arc::new(runtime_config::load_from_str(toml_str).unwrap());
     let cache = Arc::new(DnsCache::new(config.cache.clone()));
     let knowledge = Arc::new(BuiltInDomainKnowledge::new());
     let geoip = Arc::new(SimpleGeoIp);
@@ -118,7 +118,7 @@ enabled = true
 domain = "ipv6.local"
 ips = ["2001:db8::1"]
 "#;
-    let config = Arc::new(border_dns_config::load_from_str(toml_str).unwrap());
+    let config = Arc::new(runtime_config::load_from_str(toml_str).unwrap());
     let cache = Arc::new(DnsCache::new(config.cache.clone()));
     let knowledge = Arc::new(BuiltInDomainKnowledge::new());
     let geoip = Arc::new(SimpleGeoIp);
@@ -160,7 +160,7 @@ enabled = true
 domain = "blocked.local"
 ips = ["1.2.3.4"]
 "#;
-    let config = Arc::new(border_dns_config::load_from_str(toml_str).unwrap());
+    let config = Arc::new(runtime_config::load_from_str(toml_str).unwrap());
     let cache = Arc::new(DnsCache::new(config.cache.clone()));
     let knowledge = Arc::new(BuiltInDomainKnowledge::new());
     let geoip = Arc::new(SimpleGeoIp);
@@ -207,7 +207,7 @@ enabled = false
 domain = "blocked.local"
 ips = ["1.2.3.4"]
 "#;
-    let config = Arc::new(border_dns_config::load_from_str(toml_str).unwrap());
+    let config = Arc::new(runtime_config::load_from_str(toml_str).unwrap());
     let cache = Arc::new(DnsCache::new(config.cache.clone()));
     let knowledge = Arc::new(BuiltInDomainKnowledge::new());
     let geoip = Arc::new(SimpleGeoIp);
@@ -255,7 +255,7 @@ blackhole_ipv6 = "fc00::"
 domains = ["ads.example.com"]
 suffixes = []
 "#;
-    let config = Arc::new(border_dns_config::load_from_str(toml_str).unwrap());
+    let config = Arc::new(runtime_config::load_from_str(toml_str).unwrap());
     let cache = Arc::new(DnsCache::new(config.cache.clone()));
     let knowledge = Arc::new(BuiltInDomainKnowledge::new());
     let geoip = Arc::new(SimpleGeoIp);
@@ -302,7 +302,7 @@ blackhole_ipv6 = "::"
 domains = []
 suffixes = ["doubleclick.net"]
 "#;
-    let config = Arc::new(border_dns_config::load_from_str(toml_str).unwrap());
+    let config = Arc::new(runtime_config::load_from_str(toml_str).unwrap());
     let cache = Arc::new(DnsCache::new(config.cache.clone()));
     let knowledge = Arc::new(BuiltInDomainKnowledge::new());
     let geoip = Arc::new(SimpleGeoIp);
@@ -343,7 +343,7 @@ blackhole_ipv4 = "198.18.0.1"
 blackhole_ipv6 = "fc00::1"
 domains = ["tracker.evil.com"]
 "#;
-    let config = Arc::new(border_dns_config::load_from_str(toml_str).unwrap());
+    let config = Arc::new(runtime_config::load_from_str(toml_str).unwrap());
     let cache = Arc::new(DnsCache::new(config.cache.clone()));
     let knowledge = Arc::new(BuiltInDomainKnowledge::new());
     let geoip = Arc::new(SimpleGeoIp);
@@ -382,7 +382,7 @@ endpoint = "223.5.5.5:53"
 enabled = true
 domains = ["ads.example.com"]
 "#;
-    let config = Arc::new(border_dns_config::load_from_str(toml_str).unwrap());
+    let config = Arc::new(runtime_config::load_from_str(toml_str).unwrap());
     let cache = Arc::new(DnsCache::new(config.cache.clone()));
     let knowledge = Arc::new(BuiltInDomainKnowledge::new());
     let geoip = Arc::new(SimpleGeoIp);
@@ -422,7 +422,7 @@ endpoint = "223.5.5.5:53"
 enabled = false
 domains = ["ads.example.com"]
 "#;
-    let config = Arc::new(border_dns_config::load_from_str(toml_str).unwrap());
+    let config = Arc::new(runtime_config::load_from_str(toml_str).unwrap());
     let cache = Arc::new(DnsCache::new(config.cache.clone()));
     let knowledge = Arc::new(BuiltInDomainKnowledge::new());
     let geoip = Arc::new(SimpleGeoIp);
@@ -473,7 +473,7 @@ ips = ["10.0.0.1"]
 enabled = true
 domains = ["example.local"]
 "#;
-    let config = Arc::new(border_dns_config::load_from_str(toml_str).unwrap());
+    let config = Arc::new(runtime_config::load_from_str(toml_str).unwrap());
     let cache = Arc::new(DnsCache::new(config.cache.clone()));
     let knowledge = Arc::new(BuiltInDomainKnowledge::new());
     let geoip = Arc::new(SimpleGeoIp);

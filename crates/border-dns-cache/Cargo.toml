@@ -10,7 +10,7 @@ description = "DNS TTL cache with basic metrics for BorderDNS runtime."
 [dependencies]
 dns-types.workspace = true
 dns-protocol.workspace = true
-border-dns-config.workspace = true
+runtime-config.workspace = true
 dashmap.workspace = true
 tracing.workspace = true
 

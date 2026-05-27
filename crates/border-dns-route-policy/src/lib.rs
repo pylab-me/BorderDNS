@@ -16,8 +16,6 @@
 
 use std::net::IpAddr;
 
-use border_dns_domain_knowledge::DomainKnowledge;
-use border_dns_geoip::GeoIpLookup;
 use dns_protocol::rr::RData;
 use dns_types::CnameHint;
 use dns_types::Confidence;
@@ -27,6 +25,8 @@ use dns_types::ReasonCode;
 use dns_types::ResolverLocation;
 use dns_types::Route;
 use dns_types::RouteSource;
+use domain_knowledge::DomainKnowledge;
+use geoip::GeoIpLookup;
 
 // ─── Route Decision ──────────────────────────────────────────────
 

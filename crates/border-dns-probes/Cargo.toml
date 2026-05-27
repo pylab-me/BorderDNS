@@ -9,7 +9,7 @@ description = "TLS identity and latency probes for BorderDNS governance loop."
 
 [dependencies]
 dns-types.workspace = true
-border-dns-facts.workspace = true
+facts.workspace = true
 tokio.workspace = true
 tokio-rustls.workspace = true
 tracing.workspace = true

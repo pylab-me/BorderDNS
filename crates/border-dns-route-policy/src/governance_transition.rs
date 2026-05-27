@@ -12,14 +12,14 @@
 //! - Review -> Fallback when review duration or conflicts exceed limits
 //! - Fallback -> Learning on TTL expiry or manual reset
 
-use border_dns_facts::DomainGovernanceState;
-use border_dns_facts::FallbackThresholds;
-use border_dns_facts::GovernancePhase;
-use border_dns_facts::GovernanceThresholds;
-use border_dns_facts::LocalOnlyStableThresholds;
-use border_dns_facts::ReviewThresholds;
-use border_dns_facts::StablePromotionThresholds;
-use border_dns_facts::ThirdPartyMode;
+use facts::DomainGovernanceState;
+use facts::FallbackThresholds;
+use facts::GovernancePhase;
+use facts::GovernanceThresholds;
+use facts::LocalOnlyStableThresholds;
+use facts::ReviewThresholds;
+use facts::StablePromotionThresholds;
+use facts::ThirdPartyMode;
 
 // ─── Transition Input ────────────────────────────────────────────
 

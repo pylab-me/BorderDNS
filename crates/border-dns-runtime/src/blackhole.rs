@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use border_dns_config::BlackholeConfig;
+use runtime_config::BlackholeConfig;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tracing::debug;

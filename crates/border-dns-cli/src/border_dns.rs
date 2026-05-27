@@ -12,7 +12,7 @@ fn main() -> Result<()> {
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false);
 
-    let config = border_dns_config::load_from_file(&config_path)?;
+    let config = runtime_config::load_from_file(&config_path)?;
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(border_dns_runtime::run(config, verbose))?;
 

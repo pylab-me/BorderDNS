@@ -14,8 +14,8 @@
 use std::net::IpAddr;
 use std::time::Duration;
 
-use border_dns_facts::ProbeQuality;
-use border_dns_facts::TlsIdentityStatus;
+use facts::ProbeQuality;
+use facts::TlsIdentityStatus;
 use serde::Deserialize;
 use serde::Serialize;
 

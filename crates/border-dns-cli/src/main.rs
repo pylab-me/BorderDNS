@@ -11,9 +11,9 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
-use border_dns_domain_knowledge::DomainKnowledge;
 use clap::Parser;
 use clap::Subcommand;
+use domain_knowledge::DomainKnowledge;
 
 /// BorderDNS — facts-aware DNS governance loop.
 #[derive(Parser)]
@@ -95,11 +95,11 @@ fn main() -> Result<()> {
 
     match cli.command {
         Commands::Run { config, verbose } => {
-            let config = border_dns_config::load_from_file(&config)?;
+            let config = runtime_config::load_from_file(&config)?;
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(border_dns_runtime::run(config, verbose))?;
         }
-        Commands::ValidateConfig { config } => match border_dns_config::load_from_file(&config) {
+        Commands::ValidateConfig { config } => match runtime_config::load_from_file(&config) {
             Ok(_) => {
                 println!("✓ Configuration is valid: {}", config.display());
             }
@@ -109,8 +109,8 @@ fn main() -> Result<()> {
             }
         },
         Commands::InspectCache { config } => {
-            let config = border_dns_config::load_from_file(&config)?;
-            let cache = border_dns_cache::DnsCache::new(config.cache.clone());
+            let config = runtime_config::load_from_file(&config)?;
+            let cache = route_cache::DnsCache::new(config.cache.clone());
             let stats = cache.stats();
             println!("Cache statistics:");
             println!("  entries: {}", stats.entries);
@@ -144,9 +144,9 @@ fn main() -> Result<()> {
 // ─── Inspect Domain ──────────────────────────────────────────────
 
 fn cmd_inspect_domain(domain: &str, config_path: &PathBuf, json: bool) -> Result<()> {
-    let config = border_dns_config::load_from_file(config_path)?;
-    let knowledge = border_dns_domain_knowledge::BuiltInDomainKnowledge::new();
-    let route_policy = border_dns_route_policy::RoutePolicy::new(config.resolver.location);
+    let config = runtime_config::load_from_file(config_path)?;
+    let knowledge = domain_knowledge::BuiltInDomainKnowledge::new();
+    let route_policy = route_policy::RoutePolicy::new(config.resolver.location);
 
     // Step 1: Domain prior classification
     let decision = route_policy.decide_by_domain_prior(domain, &knowledge);
@@ -159,12 +159,12 @@ fn cmd_inspect_domain(domain: &str, config_path: &PathBuf, json: bool) -> Result
         dns_types::Route::Bootstrap => "bootstrap",
         dns_types::Route::Fallback => "unknown",
     };
-    let score_input = border_dns_route_policy::scoring::RouteEvidenceInput {
+    let score_input = route_policy::scoring::RouteEvidenceInput {
         prior_route: prior_route_str.to_string(),
         runtime_confidence: 0.0,
-        ..border_dns_route_policy::scoring::RouteEvidenceInput::default()
+        ..route_policy::scoring::RouteEvidenceInput::default()
     };
-    let score = border_dns_route_policy::scoring::score_route_evidence(&score_input);
+    let score = route_policy::scoring::score_route_evidence(&score_input);
 
     if json {
         let output = serde_json::json!({
@@ -233,9 +233,9 @@ fn cmd_inspect_domain(domain: &str, config_path: &PathBuf, json: bool) -> Result
 // ─── Inspect Governance ──────────────────────────────────────────
 
 fn cmd_inspect_governance(domain: &str, config_path: &PathBuf, json: bool) -> Result<()> {
-    let config = border_dns_config::load_from_file(config_path)?;
-    let knowledge = border_dns_domain_knowledge::BuiltInDomainKnowledge::new();
-    let route_policy = border_dns_route_policy::RoutePolicy::new(config.resolver.location);
+    let config = runtime_config::load_from_file(config_path)?;
+    let knowledge = domain_knowledge::BuiltInDomainKnowledge::new();
+    let route_policy = route_policy::RoutePolicy::new(config.resolver.location);
 
     let decision = route_policy.decide_by_domain_prior(domain, &knowledge);
     let prior_route_str = match decision.execution_route {
@@ -246,11 +246,8 @@ fn cmd_inspect_governance(domain: &str, config_path: &PathBuf, json: bool) -> Re
     };
 
     let now = chrono::Utc::now();
-    let gov_state = border_dns_facts::DomainGovernanceState::new(
-        domain.to_string(),
-        prior_route_str.to_string(),
-        now,
-    );
+    let gov_state =
+        facts::DomainGovernanceState::new(domain.to_string(), prior_route_str.to_string(), now);
 
     if json {
         let output = serde_json::json!({
@@ -326,7 +323,7 @@ fn cmd_inspect_governance(domain: &str, config_path: &PathBuf, json: bool) -> Re
 // ─── Inspect Review Candidates ───────────────────────────────────
 
 fn cmd_inspect_review_candidates(config_path: &PathBuf, json: bool) -> Result<()> {
-    let _config = border_dns_config::load_from_file(config_path)?;
+    let _config = runtime_config::load_from_file(config_path)?;
 
     // Without a running server, there are no review candidates.
     // This command is a placeholder that shows the format.

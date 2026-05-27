@@ -10,13 +10,13 @@ pub mod server;
 
 use std::sync::Arc;
 
-use border_dns_cache::DnsCache;
-use border_dns_config::Config;
-use border_dns_facts::FactEmit;
-use border_dns_facts::FactStoreWriter;
-use border_dns_facts::GovernanceStore;
-use border_dns_facts::ObservationJob;
 use dns_transport::MetricsRegistry;
+use facts::FactEmit;
+use facts::FactStoreWriter;
+use facts::GovernanceStore;
+use facts::ObservationJob;
+use route_cache::DnsCache;
+use runtime_config::Config;
 use tokio::sync::Notify;
 use tokio::sync::mpsc;
 use tracing::info;
@@ -55,7 +55,7 @@ impl RuntimeContext {
 /// Returns error if the tracing subscriber fails to initialize.
 pub fn init_tracing(verbose: bool) -> anyhow::Result<()> {
     let filter = if verbose {
-        "border_dns_runtime=debug,border_dns_upstream=debug,border_dns_cache=debug,border_dns=debug,dns_transport=debug"
+        "border_dns_runtime=debug,border_dns_upstream=debug,route_cache=debug,border_dns=debug,dns_transport=debug"
     } else {
         "info"
     };

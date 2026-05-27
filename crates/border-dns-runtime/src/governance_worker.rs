@@ -8,15 +8,15 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use border_dns_facts::FactEmit;
-use border_dns_facts::FactStoreWriter;
-use border_dns_facts::GovernancePhase;
-use border_dns_facts::GovernanceStore;
-use border_dns_facts::ObservationJob;
-use border_dns_facts::ReviewCandidatesArtifact;
-use border_dns_facts::ReviewDomainEntry;
-use border_dns_facts::ReviewSummary;
 use chrono::Utc;
+use facts::FactEmit;
+use facts::FactStoreWriter;
+use facts::GovernancePhase;
+use facts::GovernanceStore;
+use facts::ObservationJob;
+use facts::ReviewCandidatesArtifact;
+use facts::ReviewDomainEntry;
+use facts::ReviewSummary;
 use tokio::sync::mpsc;
 use tracing::error;
 use tracing::info;
@@ -190,7 +190,7 @@ pub fn generate_review_candidates(governance_store: &GovernanceStore) -> ReviewC
 }
 
 /// Determine the primary reason a domain is in Review.
-fn determine_review_reason(state: &border_dns_facts::DomainGovernanceState) -> String {
+fn determine_review_reason(state: &facts::DomainGovernanceState) -> String {
     if state.tls_mismatch_count_24h >= 2 {
         "tls_mismatch".into()
     } else if state.hard_conflict_count_24h >= 3 {

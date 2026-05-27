@@ -16,13 +16,13 @@ name = "border-dns-cli"
 path = "src/main.rs"
 
 [dependencies]
-border-dns-config.workspace = true
-border-dns-cache.workspace = true
+runtime-config.workspace = true
+route-cache.workspace = true
 border-dns-runtime.workspace = true
-border-dns-domain-knowledge.workspace = true
-border-dns-geoip.workspace = true
-border-dns-route-policy.workspace = true
-border-dns-facts.workspace = true
+domain-knowledge.workspace = true
+geoip.workspace = true
+route-policy.workspace = true
+facts.workspace = true
 dns-types.workspace = true
 chrono.workspace = true
 clap.workspace = true

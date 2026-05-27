@@ -8,31 +8,31 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
-use border_dns_cache::DnsCache;
-use border_dns_config::Config;
-use border_dns_domain_knowledge::BlockMatcher;
-use border_dns_domain_knowledge::BuiltInDomainKnowledge;
-use border_dns_domain_knowledge::HostsTable;
-use border_dns_facts::FactEmit;
-use border_dns_facts::GovernancePhase;
-use border_dns_facts::GovernanceStore;
-use border_dns_facts::GovernanceThresholds;
-use border_dns_facts::MeaningfulEventKind;
-use border_dns_facts::ObservationJob;
-use border_dns_facts::ObservationJobKind;
-use border_dns_geoip::SimpleGeoIp;
-use border_dns_route_policy::RouteDecision;
-use border_dns_route_policy::RoutePolicy;
-use border_dns_route_policy::governance_transition::GovernanceTransitionInput;
-use border_dns_route_policy::governance_transition::evaluate_governance_transition;
-use border_dns_route_policy::scoring::RouteEvidenceInput;
-use border_dns_route_policy::scoring::score_route_evidence;
 use border_dns_upstream;
 use dns_protocol::header::ResponseCode;
 use dns_protocol::message::DnsMessage;
 use dns_transport::RequestMeta;
 use dns_types::QType;
 use dns_types::Route;
+use domain_knowledge::BlockMatcher;
+use domain_knowledge::BuiltInDomainKnowledge;
+use domain_knowledge::HostsTable;
+use facts::FactEmit;
+use facts::GovernancePhase;
+use facts::GovernanceStore;
+use facts::GovernanceThresholds;
+use facts::MeaningfulEventKind;
+use facts::ObservationJob;
+use facts::ObservationJobKind;
+use geoip::SimpleGeoIp;
+use route_cache::DnsCache;
+use route_policy::RouteDecision;
+use route_policy::RoutePolicy;
+use route_policy::governance_transition::GovernanceTransitionInput;
+use route_policy::governance_transition::evaluate_governance_transition;
+use route_policy::scoring::RouteEvidenceInput;
+use route_policy::scoring::score_route_evidence;
+use runtime_config::Config;
 
 // ─── Query Context ───────────────────────────────────────────────
 
@@ -92,9 +92,9 @@ impl Pipeline {
         let governance_store = Arc::new(GovernanceStore::new());
         let mut governance_thresholds = GovernanceThresholds::default();
         governance_thresholds.third_party_mode = if config.third_party.enabled {
-            border_dns_facts::ThirdPartyMode::Enabled
+            facts::ThirdPartyMode::Enabled
         } else {
-            border_dns_facts::ThirdPartyMode::Disabled
+            facts::ThirdPartyMode::Disabled
         };
         let governance_thresholds = Arc::new(governance_thresholds);
         let (fact_tx, _fact_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -489,7 +489,7 @@ impl Pipeline {
 
     // ─── Hosts / Block config builder helpers ──────────────────────
 
-    fn build_hosts_from_config(hosts_config: &border_dns_config::HostsConfig) -> HostsTable {
+    fn build_hosts_from_config(hosts_config: &runtime_config::HostsConfig) -> HostsTable {
         if !hosts_config.enabled {
             return HostsTable::new();
         }
@@ -505,9 +505,7 @@ impl Pipeline {
         builder.build()
     }
 
-    fn build_block_matcher_from_config(
-        block_config: &border_dns_config::BlockConfig,
-    ) -> BlockMatcher {
+    fn build_block_matcher_from_config(block_config: &runtime_config::BlockConfig) -> BlockMatcher {
         if !block_config.enabled {
             return BlockMatcher::default();
         }

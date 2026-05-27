@@ -118,7 +118,7 @@ static DOH_CLIENT: LazyLock<DohClient> = LazyLock::new(|| {
 /// Returns `UpstreamError::AllFailed` if all upstreams fail.
 pub async fn forward(
     query: &dns_protocol::message::DnsMessage,
-    upstreams: &[border_dns_config::UpstreamServer],
+    upstreams: &[runtime_config::UpstreamServer],
     default_timeout: Duration,
 ) -> Result<UpstreamResponse, UpstreamError> {
     if upstreams.is_empty() {
@@ -169,34 +169,34 @@ pub async fn forward(
 /// Forward a DNS query to a single upstream server.
 async fn forward_single(
     wire: &[u8],
-    server: &border_dns_config::UpstreamServer,
+    server: &runtime_config::UpstreamServer,
     timeout_dur: Duration,
 ) -> Result<UpstreamResponse, UpstreamError> {
     let start = Instant::now();
 
     let (response_bytes, sock_addr) = match server.transport {
-        border_dns_config::DnsProtocol::Udp => {
+        runtime_config::DnsProtocol::Udp => {
             let addr = parse_socket_addr(&server.endpoint)?;
             let bytes = forward_udp(wire, addr, timeout_dur).await?;
             (bytes, addr)
         }
-        border_dns_config::DnsProtocol::Tcp => {
+        runtime_config::DnsProtocol::Tcp => {
             let addr = parse_socket_addr(&server.endpoint)?;
             let bytes = forward_tcp(wire, addr, timeout_dur).await?;
             (bytes, addr)
         }
-        border_dns_config::DnsProtocol::Tls => {
+        runtime_config::DnsProtocol::Tls => {
             let addr = parse_socket_addr(&server.endpoint)?;
             let server_name = server.server_name.as_deref().unwrap_or("dns.google");
             let bytes = forward_tls(wire, addr, server_name, timeout_dur).await?;
             (bytes, addr)
         }
-        border_dns_config::DnsProtocol::Https => {
+        runtime_config::DnsProtocol::Https => {
             let bytes = forward_doh(wire, &server.endpoint, timeout_dur).await?;
             let dummy_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
             (bytes, dummy_addr)
         }
-        border_dns_config::DnsProtocol::Quic => {
+        runtime_config::DnsProtocol::Quic => {
             return Err(UpstreamError::Protocol(
                 "QUIC upstream not yet implemented".into(),
             ));

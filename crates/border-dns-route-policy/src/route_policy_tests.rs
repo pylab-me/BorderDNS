@@ -1,11 +1,11 @@
 use std::net::Ipv4Addr;
 
-use border_dns_domain_knowledge::BuiltInDomainKnowledge;
+use domain_knowledge::BuiltInDomainKnowledge;
 
 use super::*;
 
-fn test_geoip() -> border_dns_geoip::SimpleGeoIp {
-    border_dns_geoip::SimpleGeoIp
+fn test_geoip() -> geoip::SimpleGeoIp {
+    geoip::SimpleGeoIp
 }
 
 #[test]

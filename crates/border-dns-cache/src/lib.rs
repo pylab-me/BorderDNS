@@ -23,12 +23,12 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
 
-use border_dns_config::CacheConfig;
 use dashmap::DashMap;
 use dns_protocol::message::DnsMessage;
 use dns_protocol::name::DomainName;
 use dns_types::QType;
 use dns_types::Route;
+use runtime_config::CacheConfig;
 
 // ─── Public cache response ───────────────────────────────────────
 
