@@ -26,6 +26,9 @@ pub struct Config {
     /// Resolver configuration.
     #[serde(default)]
     pub resolver: ResolverConfig,
+    /// Third-party observation configuration.
+    #[serde(default)]
+    pub third_party: ThirdPartyConfig,
 }
 
 impl Config {
@@ -505,6 +508,47 @@ impl Default for ResolverConfig {
             location: dns_types::ResolverLocation::default(),
         }
     }
+}
+
+// ─── Third-party observation config ──────────────────────────────
+
+/// Third-party observation configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThirdPartyConfig {
+    /// Whether third-party observation is enabled.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Third-party observer peers.
+    #[serde(default)]
+    pub peers: Vec<ThirdPartyPeerConfig>,
+}
+
+impl Default for ThirdPartyConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            peers: Vec::new(),
+        }
+    }
+}
+
+/// A single third-party observer peer.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThirdPartyPeerConfig {
+    /// Unique observer identifier (e.g., "cn-shanghai-1").
+    pub id: String,
+    /// Observer endpoint URL (e.g., "https://cn-shanghai-1.example.com/observe").
+    pub endpoint: String,
+    /// Geographic location of the observer.
+    #[serde(default)]
+    pub location: dns_types::ResolverLocation,
+    /// Trust level hint.
+    #[serde(default = "default_peer_trust_level")]
+    pub trust_level: String,
+}
+
+fn default_peer_trust_level() -> String {
+    "normal".into()
 }
 
 // ─── Legacy compatibility: ListenerAddr ────────────────────────────

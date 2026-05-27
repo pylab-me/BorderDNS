@@ -24,6 +24,8 @@ pub use model::TlsListenerConfig;
 pub use model::UdpListenerConfig;
 pub use model::UpstreamGroupConfig;
 pub use model::UpstreamServer;
+pub use model::ThirdPartyConfig;
+pub use model::ThirdPartyPeerConfig;
 
 /// Load configuration from a TOML file.
 ///

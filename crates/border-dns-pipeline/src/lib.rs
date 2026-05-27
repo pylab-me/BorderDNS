@@ -84,7 +84,13 @@ impl Pipeline {
     ) -> Self {
         let route_policy = Arc::new(RoutePolicy::new(config.resolver.location));
         let governance_store = Arc::new(GovernanceStore::new());
-        let governance_thresholds = Arc::new(GovernanceThresholds::default());
+        let mut governance_thresholds = GovernanceThresholds::default();
+        governance_thresholds.third_party_mode = if config.third_party.enabled {
+            border_dns_facts::ThirdPartyMode::Enabled
+        } else {
+            border_dns_facts::ThirdPartyMode::Disabled
+        };
+        let governance_thresholds = Arc::new(governance_thresholds);
         let (fact_tx, _fact_rx) = tokio::sync::mpsc::unbounded_channel();
         let (observation_tx, _observation_rx) = tokio::sync::mpsc::unbounded_channel();
 
