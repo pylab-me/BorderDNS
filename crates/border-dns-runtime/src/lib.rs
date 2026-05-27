@@ -4,6 +4,7 @@
 //! No reusable business logic should live here.
 
 pub mod blackhole;
+pub mod governance_worker;
 pub mod handler;
 pub mod server;
 
@@ -11,8 +12,13 @@ use std::sync::Arc;
 
 use border_dns_cache::DnsCache;
 use border_dns_config::Config;
+use border_dns_facts::FactEmit;
+use border_dns_facts::FactStoreWriter;
+use border_dns_facts::GovernanceStore;
+use border_dns_facts::ObservationJob;
 use dns_transport::MetricsRegistry;
 use tokio::sync::Notify;
+use tokio::sync::mpsc;
 use tracing::info;
 
 /// Shared runtime state accessible by all server tasks.
@@ -80,6 +86,47 @@ pub async fn run(config: Config, verbose: bool) -> anyhow::Result<()> {
 
     info!("BorderDNS runtime starting");
 
+    // ── Governance infrastructure ────────────────────────────────
+    let governance_store = Arc::new(GovernanceStore::new());
+
+    // Fact store writer — writes JSONL to state/facts/ under current directory.
+    let fact_store_dir = std::path::PathBuf::from("state/facts");
+    let fact_store = match FactStoreWriter::new(fact_store_dir) {
+        Ok(writer) => Some(Arc::new(writer)),
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to create fact store writer, JSONL persistence disabled");
+            None
+        }
+    };
+
+    // Create channels for fact emission and observation jobs.
+    let (_fact_tx, fact_rx) = mpsc::unbounded_channel::<FactEmit>();
+    let (_observation_tx, observation_rx) = mpsc::unbounded_channel::<ObservationJob>();
+
+    // Spawn background workers.
+    if let Some(ref fs) = fact_store {
+        let _writer_handle = governance_worker::spawn_fact_writer(fact_rx, Arc::clone(fs));
+    }
+    let _obs_handle = governance_worker::spawn_observation_worker(observation_rx);
+
+    let _maint_handle = governance_worker::spawn_governance_maintenance(
+        Arc::clone(&governance_store),
+        fact_store.as_ref().map(Arc::clone),
+        std::time::Duration::from_secs(300), // every 5 minutes
+    );
+
+    // ── Startup review summary ───────────────────────────────────
+    let fact_store_path = fact_store
+        .as_ref()
+        .map(|_| "state/facts/")
+        .unwrap_or("disabled");
+    governance_worker::log_startup_review_summary(
+        &governance_store,
+        ctx.config.third_party.enabled,
+        fact_store_path,
+    );
+
+    // ── DNS listeners ────────────────────────────────────────────
     let mut handles = Vec::new();
 
     // Start blackhole HTTP acceptor (before DNS listeners).

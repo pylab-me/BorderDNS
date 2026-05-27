@@ -232,6 +232,22 @@ impl DnsCache {
         message: &DnsMessage,
     ) {
         let ttl = self.clamp_ttl(extract_min_ttl(message));
+        self.insert_scoped_with_ttl(route, qtype, name, message, ttl);
+    }
+
+    /// Insert a DNS response into the route-scoped cache with an explicit TTL.
+    ///
+    /// Used by the pipeline to apply location-aware TTL policies
+    /// (e.g., enhanced TTL for china+china).
+    pub fn insert_scoped_with_ttl(
+        &self,
+        route: Route,
+        qtype: QType,
+        name: &DomainName,
+        message: &DnsMessage,
+        ttl: u32,
+    ) {
+        let ttl = self.clamp_ttl(ttl);
 
         let mut stored = message.clone();
         for rr in &mut stored.answers {

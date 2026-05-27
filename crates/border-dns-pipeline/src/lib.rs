@@ -423,10 +423,30 @@ impl Pipeline {
                     "RESP"
                 );
 
-                // ── Stage 7: Cache Insert ──────────────────────
+                // ── Stage 7: Cache Insert (location-aware TTL) ──
                 if rcode == ResponseCode::NoError && answer_count > 0 {
-                    self.cache
-                        .insert_scoped(route, qtype, &domain, &upstream_resp.message);
+                    // Location-aware TTL: china+china uses enhanced (longer) TTL.
+                    let effective_ttl = if route == Route::China
+                        && self.config.resolver.location == dns_types::ResolverLocation::China
+                    {
+                        self.config.cache.enhanced_ttl_secs
+                    } else {
+                        // Use the minimum answer TTL (normal behavior).
+                        upstream_resp
+                            .message
+                            .answers
+                            .iter()
+                            .map(|rr| rr.ttl)
+                            .min()
+                            .unwrap_or(0)
+                    };
+                    self.cache.insert_scoped_with_ttl(
+                        route,
+                        qtype,
+                        &domain,
+                        &upstream_resp.message,
+                        effective_ttl,
+                    );
                 }
 
                 upstream_resp.message

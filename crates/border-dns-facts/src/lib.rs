@@ -19,6 +19,7 @@
 
 mod enums;
 mod fact_event;
+mod fact_store;
 mod governance_state;
 mod governance_store;
 mod observation;
@@ -27,6 +28,7 @@ mod store_manifest;
 
 pub use enums::*;
 pub use fact_event::*;
+pub use fact_store::*;
 pub use governance_state::*;
 pub use governance_store::*;
 pub use observation::*;

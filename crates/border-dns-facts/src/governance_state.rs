@@ -87,6 +87,17 @@ pub struct DomainGovernanceState {
     /// When the governance phase last changed.
     pub last_transition_at: DateTime<Utc>,
 
+    /// When the last mixed geo observation was recorded (for 24h decay).
+    pub last_mixed_at: Option<DateTime<Utc>>,
+    /// When the last hard conflict was recorded (for 24h decay).
+    pub last_hard_conflict_at: Option<DateTime<Utc>>,
+    /// When the last TLS mismatch was recorded (for 24h decay).
+    pub last_tls_mismatch_at: Option<DateTime<Utc>>,
+    /// When the last route-opposite evidence was recorded (for 24h decay).
+    pub last_route_opposite_at: Option<DateTime<Utc>>,
+    /// When the last soft conflict was recorded (for 24h decay).
+    pub last_soft_conflict_at: Option<DateTime<Utc>>,
+
     /// Monotonically increasing version for optimistic concurrency control.
     pub state_version: u64,
 }
@@ -121,7 +132,41 @@ impl DomainGovernanceState {
             third_party_summary: ThirdPartyEvidenceSummary::default(),
             last_observed_at: now,
             last_transition_at: now,
+            last_mixed_at: None,
+            last_hard_conflict_at: None,
+            last_tls_mismatch_at: None,
+            last_route_opposite_at: None,
+            last_soft_conflict_at: None,
             state_version: 1,
+        }
+    }
+
+    /// Decay 24h rolling window counters.
+    ///
+    /// Resets any `_count_24h` field to 0 if its corresponding `last_*_at`
+    /// timestamp is older than 24 hours from `now`. This is intended to be
+    /// called periodically (e.g., by a background worker or on every Nth
+    /// observation) to prevent stale counters from accumulating.
+    pub fn decay_24h_counters(&mut self, now: DateTime<Utc>) {
+        let window = chrono::Duration::hours(24);
+
+        if self.last_mixed_at.is_some_and(|t| now - t > window) {
+            self.mixed_count_24h = 0;
+        }
+        if self.last_soft_conflict_at.is_some_and(|t| now - t > window) {
+            self.soft_conflict_count_24h = 0;
+        }
+        if self.last_hard_conflict_at.is_some_and(|t| now - t > window) {
+            self.hard_conflict_count_24h = 0;
+        }
+        if self.last_tls_mismatch_at.is_some_and(|t| now - t > window) {
+            self.tls_mismatch_count_24h = 0;
+        }
+        if self
+            .last_route_opposite_at
+            .is_some_and(|t| now - t > window)
+        {
+            self.route_opposite_count_24h = 0;
         }
     }
 }

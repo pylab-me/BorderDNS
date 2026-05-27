@@ -514,6 +514,10 @@ pub struct CacheConfig {
     /// Negative cache TTL in seconds (default: 30).
     #[serde(default = "default_negative_ttl")]
     pub negative_ttl_secs: u32,
+    /// Enhanced TTL in seconds for china-location + china-route domains (default: 3600 = 1h).
+    /// Only used when `resolver.location = "china"` and `route = China`.
+    #[serde(default = "default_enhanced_ttl")]
+    pub enhanced_ttl_secs: u32,
 }
 
 impl Default for CacheConfig {
@@ -523,6 +527,7 @@ impl Default for CacheConfig {
             min_ttl_secs: default_min_ttl(),
             max_ttl_secs: default_max_ttl(),
             negative_ttl_secs: default_negative_ttl(),
+            enhanced_ttl_secs: default_enhanced_ttl(),
         }
     }
 }
@@ -823,6 +828,10 @@ fn default_max_ttl() -> u32 {
 
 fn default_negative_ttl() -> u32 {
     30
+}
+
+fn default_enhanced_ttl() -> u32 {
+    3600
 }
 
 // ─── Validation helpers ───────────────────────────────────────────
