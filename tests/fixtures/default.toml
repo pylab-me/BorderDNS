@@ -4,6 +4,7 @@ location = "china"
 [server]
 default_timeout_ms = 4500
 graceful_shutdown_ms = 5000
+max_concurrent = 1024
 
 [listeners.udp]
 enabled = true
@@ -20,11 +21,27 @@ endpoint = "223.5.5.5:53"
 
 # China group (route = china)
 [[upstreams.china]]
+name = "alidns-udp"
+endpoint = "223.5.5.5:53"
+
+[[upstreams.china]]
 name = "alidns-tls"
 transport = "tls"
 endpoint = "223.5.5.5:853"
 server_name = "dns.alidns.com"
 timeout_ms = 4500
+
+[[upstreams.china]]
+name = "alidns-doh"
+transport = "https"
+endpoint = "https://dns.alidns.com/dns-query"
+server_name = "dns.alidns.com"
+timeout_ms = 5000
+
+# Foreign group (route = foreign)
+[[upstreams.foreign]]
+name = "cloudflare-udp"
+endpoint = "1.1.1.1:53"
 
 [[upstreams.foreign]]
 name = "cloudflare-tls"
@@ -33,26 +50,45 @@ endpoint = "1.1.1.1:853"
 server_name = "one.one.one.one"
 timeout_ms = 4500
 
+[[upstreams.foreign]]
+name = "cloudflare-doh"
+transport = "https"
+endpoint = "https://cloudflare-dns.com/dns-query"
+server_name = "cloudflare-dns.com"
+timeout_ms = 5000
+
 # Cache
 [cache]
 max_entries = 4096
 min_ttl_secs = 12
 max_ttl_secs = 900
 negative_ttl_secs = 30
+enhanced_ttl_secs = 3600
 
-# ─── Hosts Override ───────────────────────────────────────────
+# ─── Third-party observation ──────────────────────────────────────
+# Optional: configure external observer peers for cross-location
+# domain evidence collection.
+[third_party]
+enabled = false
+# [[third_party.peers]]
+# id = "cn-shanghai-1"
+# endpoint = "https://cn-shanghai-1.example.com/observe"
+# location = "china"
+# trust_level = "normal"
+
+# ─── Hosts Override ───────────────────────────────────────────────
 # Static domain → IP overrides (like /etc/hosts).
 [hosts]
 enabled = false
 ttl_secs = 60
-# Inline entries:
-# [[hosts.entries]]
-# domain = "blocked.local"
-# ips = ["127.0.0.1"]
+# Inline entries (domain → IP list):
+# [hosts.entries]
+# "blocked.local" = ["127.0.0.1"]
+#
 # External hosts files (standard /etc/hosts format):
 # files = ["/etc/hosts"]
 
-# ─── Domain Block ─────────────────────────────────────────────
+# ─── Domain Block ─────────────────────────────────────────────────
 # Block DNS requests for matching domains.
 [block]
 enabled = false
@@ -62,11 +98,10 @@ blackhole_ipv4 = "0.0.0.0"
 blackhole_ipv6 = "::"
 # suppress_qtypes = ["HTTPS"]
 
-# ─── Blackhole HTTP ───────────────────────────────────────────
+# ─── Blackhole HTTP ───────────────────────────────────────────────
 # HTTP listener returning 202 Accepted on redirect ports.
 [blackhole]
 enabled = false
 listen = "0.0.0.0"
 ports = [80, 443]
 max_header_bytes = 32768
-

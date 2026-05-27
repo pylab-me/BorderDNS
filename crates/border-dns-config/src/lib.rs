@@ -18,7 +18,6 @@ pub use model::DoHListenerConfig;
 pub use model::DoJListenerConfig;
 pub use model::DoQListenerConfig;
 pub use model::HostsConfig;
-pub use model::HostsEntry;
 pub use model::ListenerAddr;
 pub use model::ListenersConfig;
 pub use model::ResolverConfig;

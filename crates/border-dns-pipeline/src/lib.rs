@@ -494,9 +494,9 @@ impl Pipeline {
             return HostsTable::new();
         }
         let mut builder = HostsTable::new();
-        for entry in &hosts_config.entries {
-            for ip_str in &entry.ips {
-                builder = builder.with_entry(&entry.domain, ip_str);
+        for (domain, ips) in &hosts_config.entries {
+            for ip_str in ips {
+                builder = builder.with_entry(domain, ip_str);
             }
         }
         for file_path in &hosts_config.files {

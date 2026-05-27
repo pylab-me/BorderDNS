@@ -4,6 +4,8 @@
 //! with per-listener TLS certificate configuration and expanded upstream
 //! transport types.
 
+use std::collections::HashMap;
+
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -602,9 +604,14 @@ pub struct HostsConfig {
     /// Whether hosts override is enabled.
     #[serde(default)]
     pub enabled: bool,
-    /// Inline host entries: [{ domain = "example.com", ips = ["1.2.3.4"] }].
+    /// Inline host entries: domain → list of IP addresses.
+    ///
+    /// ```toml
+    /// [hosts.entries]
+    /// "example.com" = ["1.2.3.4", "2.3.4.5"]
+    /// ```
     #[serde(default)]
-    pub entries: Vec<HostsEntry>,
+    pub entries: HashMap<String, Vec<String>>,
     /// Paths to hosts files to load (standard hosts format).
     #[serde(default)]
     pub files: Vec<String>,
@@ -619,15 +626,6 @@ impl HostsConfig {
     pub fn has_data(&self) -> bool {
         self.enabled && (!self.entries.is_empty() || !self.files.is_empty())
     }
-}
-
-/// A single inline hosts entry.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HostsEntry {
-    /// Domain name (e.g., "example.com").
-    pub domain: String,
-    /// IP addresses for this domain.
-    pub ips: Vec<String>,
 }
 
 fn default_hosts_ttl() -> u32 {

@@ -67,9 +67,8 @@ endpoint = "223.5.5.5:53"
 enabled = true
 ttl_secs = 120
 
-[[hosts.entries]]
-domain = "blocked.local"
-ips = ["1.2.3.4"]
+[hosts.entries]
+"blocked.local" = ["1.2.3.4"]
 "#;
     let config = Arc::new(runtime_config::load_from_str(toml_str).unwrap());
     let cache = Arc::new(DnsCache::new(config.cache.clone()));
@@ -114,9 +113,8 @@ endpoint = "223.5.5.5:53"
 [hosts]
 enabled = true
 
-[[hosts.entries]]
-domain = "ipv6.local"
-ips = ["2001:db8::1"]
+[hosts.entries]
+"ipv6.local" = ["2001:db8::1"]
 "#;
     let config = Arc::new(runtime_config::load_from_str(toml_str).unwrap());
     let cache = Arc::new(DnsCache::new(config.cache.clone()));
@@ -156,9 +154,8 @@ endpoint = "223.5.5.5:53"
 [hosts]
 enabled = true
 
-[[hosts.entries]]
-domain = "blocked.local"
-ips = ["1.2.3.4"]
+[hosts.entries]
+"blocked.local" = ["1.2.3.4"]
 "#;
     let config = Arc::new(runtime_config::load_from_str(toml_str).unwrap());
     let cache = Arc::new(DnsCache::new(config.cache.clone()));
@@ -203,9 +200,8 @@ endpoint = "223.5.5.5:53"
 [hosts]
 enabled = false
 
-[[hosts.entries]]
-domain = "blocked.local"
-ips = ["1.2.3.4"]
+[hosts.entries]
+"blocked.local" = ["1.2.3.4"]
 "#;
     let config = Arc::new(runtime_config::load_from_str(toml_str).unwrap());
     let cache = Arc::new(DnsCache::new(config.cache.clone()));
@@ -465,9 +461,8 @@ endpoint = "223.5.5.5:53"
 [hosts]
 enabled = true
 
-[[hosts.entries]]
-domain = "example.local"
-ips = ["10.0.0.1"]
+[hosts.entries]
+"example.local" = ["10.0.0.1"]
 
 [block]
 enabled = true
