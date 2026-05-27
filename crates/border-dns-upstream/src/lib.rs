@@ -19,6 +19,7 @@ use std::sync::LazyLock;
 use std::time::Duration;
 use std::time::Instant;
 
+use dashmap::DashMap;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use thiserror::Error;
@@ -217,27 +218,46 @@ async fn forward_single(
 
 // ─── UDP upstream ────────────────────────────────────────────────
 
-/// Forward a DNS query via UDP.
-///
-/// Binds to `[::]:0` (dual-stack) when the target is IPv6,
-/// or `0.0.0.0:0` when IPv4, so that upstream IPv6 servers work.
-async fn forward_udp(
-    wire: &[u8],
-    addr: SocketAddr,
-    timeout_dur: Duration,
-) -> Result<Vec<u8>, UpstreamError> {
-    // Bind to a wildcard address matching the target's address family.
+/// Max UDP payload (EDNS0 typical limit).
+const UDP_MAX_EDNS_MESSAGE_SIZE: usize = 4096;
+
+/// Persistent per-upstream UDP socket pool.
+/// Avoids binding a new ephemeral port per query.
+static UDP_SOCKETS: LazyLock<DashMap<SocketAddr, Arc<tokio::net::UdpSocket>>> =
+    LazyLock::new(DashMap::new);
+
+/// Return a cached UDP socket for the given upstream address.
+async fn get_udp_socket(addr: &SocketAddr) -> Result<Arc<tokio::net::UdpSocket>, UpstreamError> {
+    if let Some(sock) = UDP_SOCKETS.get(addr) {
+        return Ok(Arc::clone(&sock));
+    }
+
     let bind_addr: SocketAddr = if addr.is_ipv6() {
         "[::]:0".parse().unwrap()
     } else {
         "0.0.0.0:0".parse().unwrap()
     };
-    let socket = tokio::net::UdpSocket::bind(bind_addr).await?;
+    let socket = Arc::new(tokio::net::UdpSocket::bind(bind_addr).await?);
+
+    UDP_SOCKETS.insert(*addr, Arc::clone(&socket));
+    Ok(socket)
+}
+
+/// Forward a DNS query via UDP.
+///
+/// Reuses a persistent per-upstream UDP socket instead of binding a new
+/// ephemeral port per query.
+async fn forward_udp(
+    wire: &[u8],
+    addr: SocketAddr,
+    timeout_dur: Duration,
+) -> Result<Vec<u8>, UpstreamError> {
+    let socket = get_udp_socket(&addr).await?;
 
     tokio::time::timeout(timeout_dur, async {
         socket.send_to(wire, addr).await?;
 
-        let mut buf = vec![0u8; dns_protocol::message::MAX_EDNS_MESSAGE_SIZE];
+        let mut buf = vec![0u8; UDP_MAX_EDNS_MESSAGE_SIZE];
         let (len, _) = socket.recv_from(&mut buf).await?;
         buf.truncate(len);
         Ok::<Vec<u8>, UpstreamError>(buf)
@@ -246,24 +266,79 @@ async fn forward_udp(
     .map_err(|_| UpstreamError::Timeout(timeout_dur))?
 }
 
-// ─── TCP upstream ────────────────────────────────────────────────
+// ─── Connection pool (TCP / TLS) ─────────────────────────────────
 
-/// Forward a DNS query via TCP.
-async fn forward_tcp(
+/// Maximum number of idle connections kept per upstream address.
+const POOL_MAX_IDLE: usize = 8;
+
+/// Idle timeout for pooled connections (connections older than this are evicted).
+const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
+
+/// A simple bounded connection pool with idle-timeout eviction.
+/// Wrapped in `Arc` so it can be stored in a `DashMap`.
+#[derive(Debug)]
+struct ConnPool<T: std::fmt::Debug> {
+    idle: std::sync::Mutex<Vec<(Instant, T)>>,
+    max_idle: usize,
+    idle_timeout: Duration,
+}
+
+impl<T: std::fmt::Debug> ConnPool<T> {
+    fn new(max_idle: usize, idle_timeout: Duration) -> Arc<Self> {
+        Arc::new(Self {
+            idle: std::sync::Mutex::new(Vec::with_capacity(max_idle)),
+            max_idle,
+            idle_timeout,
+        })
+    }
+
+    /// Try to get an idle connection, evicting stale entries first.
+    fn take(&self) -> Option<T> {
+        let mut guard = self.idle.lock().expect("pool lock poisoned");
+        // Evict stale entries from the back.
+        while let Some((inserted, _)) = guard.last() {
+            if inserted.elapsed() >= self.idle_timeout {
+                guard.pop();
+            } else {
+                break;
+            }
+        }
+        guard.pop().map(|(_, conn)| conn)
+    }
+
+    /// Return a connection to the pool. If the pool is full, the connection
+    /// is dropped.
+    fn put(&self, conn: T) {
+        let mut guard = self.idle.lock().expect("pool lock poisoned");
+        if guard.len() < self.max_idle {
+            guard.push((Instant::now(), conn));
+        }
+    }
+}
+
+// TCP pool: one ConnPool per upstream address.
+type TcpPool = ConnPool<tokio::net::TcpStream>;
+static TCP_POOLS: LazyLock<DashMap<SocketAddr, Arc<TcpPool>>> = LazyLock::new(DashMap::new);
+
+// TLS pool: one ConnPool per upstream address.
+type TlsConn = tokio_rustls::client::TlsStream<tokio::net::TcpStream>;
+type TlsPool = ConnPool<TlsConn>;
+static TLS_POOLS: LazyLock<DashMap<SocketAddr, Arc<TlsPool>>> = LazyLock::new(DashMap::new);
+
+/// Perform one DNS query/response exchange over an existing TCP connection.
+async fn tcp_send_recv(
+    stream: &mut tokio::net::TcpStream,
     wire: &[u8],
-    addr: SocketAddr,
     timeout_dur: Duration,
 ) -> Result<Vec<u8>, UpstreamError> {
     tokio::time::timeout(timeout_dur, async {
-        let mut stream = tokio::net::TcpStream::connect(addr).await?;
-
         // Send: 2-byte length prefix + DNS message.
         let frame = dns_protocol::tcp_frame::encode_tcp_frame(wire);
-        tokio::io::AsyncWriteExt::write_all(&mut stream, &frame).await?;
+        tokio::io::AsyncWriteExt::write_all(stream, &frame).await?;
 
         // Read: 2-byte length prefix + DNS message.
         let mut len_buf = [0u8; 2];
-        tokio::io::AsyncReadExt::read_exact(&mut stream, &mut len_buf).await?;
+        tokio::io::AsyncReadExt::read_exact(stream, &mut len_buf).await?;
         let msg_len = u16::from_be_bytes(len_buf) as usize;
 
         if msg_len > dns_protocol::tcp_frame::DEFAULT_MAX_TCP_FRAME as usize {
@@ -273,7 +348,7 @@ async fn forward_tcp(
         }
 
         let mut msg_buf = vec![0u8; msg_len];
-        tokio::io::AsyncReadExt::read_exact(&mut stream, &mut msg_buf).await?;
+        tokio::io::AsyncReadExt::read_exact(stream, &mut msg_buf).await?;
 
         Ok::<Vec<u8>, UpstreamError>(msg_buf)
     })
@@ -281,35 +356,58 @@ async fn forward_tcp(
     .map_err(|_| UpstreamError::Timeout(timeout_dur))?
 }
 
-// ─── DoT upstream ────────────────────────────────────────────────
+// ─── TCP upstream (with connection pool) ─────────────────────────
 
-/// Forward a DNS query via DoT (DNS over TLS, RFC 7858).
+/// Forward a DNS query via TCP.
 ///
-/// Uses the cached `TLS_CLIENT_CONFIG` — no per-request config rebuild.
-async fn forward_tls(
+/// Tries to reuse a pooled connection first. On success the connection is
+/// returned to the pool; on failure it is dropped and a fresh one is created.
+async fn forward_tcp(
     wire: &[u8],
     addr: SocketAddr,
-    server_name: &str,
+    timeout_dur: Duration,
+) -> Result<Vec<u8>, UpstreamError> {
+    let pool = TCP_POOLS
+        .entry(addr)
+        .or_insert_with(|| TcpPool::new(POOL_MAX_IDLE, POOL_IDLE_TIMEOUT))
+        .clone();
+
+    // Try pooled connection first.
+    if let Some(mut stream) = pool.take() {
+        if let Ok(resp) = tcp_send_recv(&mut stream, wire, timeout_dur).await {
+            pool.put(stream);
+            return Ok(resp);
+        }
+        // Pooled connection failed — drop it and fall through to a new one.
+    }
+
+    // No usable pooled connection — create a new one.
+    let mut stream = tokio::time::timeout(timeout_dur, tokio::net::TcpStream::connect(addr))
+        .await
+        .map_err(|_| UpstreamError::Timeout(timeout_dur))?
+        .map_err(UpstreamError::Io)?;
+
+    let resp = tcp_send_recv(&mut stream, wire, timeout_dur).await?;
+    pool.put(stream);
+    Ok(resp)
+}
+
+// ─── DoT upstream (with connection pool) ─────────────────────────
+
+/// Perform one DNS query/response exchange over an existing TLS stream.
+async fn tls_send_recv(
+    stream: &mut TlsConn,
+    wire: &[u8],
     timeout_dur: Duration,
 ) -> Result<Vec<u8>, UpstreamError> {
     tokio::time::timeout(timeout_dur, async {
-        let connector = tokio_rustls::TlsConnector::from(Arc::clone(&*TLS_CLIENT_CONFIG));
-        let domain = rustls::pki_types::ServerName::try_from(server_name.to_string())
-            .map_err(|e| UpstreamError::TlsHandshake(format!("invalid server name: {e}")))?;
-
-        let tcp_stream = tokio::net::TcpStream::connect(addr).await?;
-        let mut tls_stream = connector
-            .connect(domain, tcp_stream)
-            .await
-            .map_err(|e| UpstreamError::TlsHandshake(e.to_string()))?;
-
-        // Send: 2-byte length prefix + DNS message (same as TCP).
+        // Send: 2-byte length prefix + DNS message.
         let frame = dns_protocol::tcp_frame::encode_tcp_frame(wire);
-        tokio::io::AsyncWriteExt::write_all(&mut tls_stream, &frame).await?;
+        tokio::io::AsyncWriteExt::write_all(stream, &frame).await?;
 
         // Read: 2-byte length prefix + DNS message.
         let mut len_buf = [0u8; 2];
-        tokio::io::AsyncReadExt::read_exact(&mut tls_stream, &mut len_buf).await?;
+        tokio::io::AsyncReadExt::read_exact(stream, &mut len_buf).await?;
         let msg_len = u16::from_be_bytes(len_buf) as usize;
 
         if msg_len > dns_protocol::tcp_frame::DEFAULT_MAX_TCP_FRAME as usize {
@@ -319,12 +417,66 @@ async fn forward_tls(
         }
 
         let mut msg_buf = vec![0u8; msg_len];
-        tokio::io::AsyncReadExt::read_exact(&mut tls_stream, &mut msg_buf).await?;
+        tokio::io::AsyncReadExt::read_exact(stream, &mut msg_buf).await?;
 
         Ok::<Vec<u8>, UpstreamError>(msg_buf)
     })
     .await
     .map_err(|_| UpstreamError::Timeout(timeout_dur))?
+}
+
+/// Create a new TLS connection to the given address.
+async fn connect_tls(
+    addr: SocketAddr,
+    server_name: &str,
+    timeout_dur: Duration,
+) -> Result<TlsConn, UpstreamError> {
+    let connector = tokio_rustls::TlsConnector::from(Arc::clone(&*TLS_CLIENT_CONFIG));
+    let domain = rustls::pki_types::ServerName::try_from(server_name.to_string())
+        .map_err(|e| UpstreamError::TlsHandshake(format!("invalid server name: {e}")))?;
+
+    let tcp_stream = tokio::time::timeout(timeout_dur, tokio::net::TcpStream::connect(addr))
+        .await
+        .map_err(|_| UpstreamError::Timeout(timeout_dur))?
+        .map_err(UpstreamError::Io)?;
+
+    let tls_stream = connector
+        .connect(domain, tcp_stream)
+        .await
+        .map_err(|e| UpstreamError::TlsHandshake(e.to_string()))?;
+
+    Ok(tls_stream)
+}
+
+/// Forward a DNS query via DoT (DNS over TLS, RFC 7858).
+///
+/// Tries to reuse a pooled TLS connection first. On success the connection is
+/// returned to the pool; on failure it is dropped and a fresh one is created.
+async fn forward_tls(
+    wire: &[u8],
+    addr: SocketAddr,
+    server_name: &str,
+    timeout_dur: Duration,
+) -> Result<Vec<u8>, UpstreamError> {
+    let pool = TLS_POOLS
+        .entry(addr)
+        .or_insert_with(|| TlsPool::new(POOL_MAX_IDLE, POOL_IDLE_TIMEOUT))
+        .clone();
+
+    // Try pooled connection first.
+    if let Some(mut stream) = pool.take() {
+        if let Ok(resp) = tls_send_recv(&mut stream, wire, timeout_dur).await {
+            pool.put(stream);
+            return Ok(resp);
+        }
+        // Pooled connection failed — drop it and fall through to a new one.
+    }
+
+    // No usable pooled connection — create a new TLS connection.
+    let mut stream = connect_tls(addr, server_name, timeout_dur).await?;
+    let resp = tls_send_recv(&mut stream, wire, timeout_dur).await?;
+    pool.put(stream);
+    Ok(resp)
 }
 
 // ─── DoH upstream (hyper) ────────────────────────────────────────

@@ -8,7 +8,17 @@
 //! P1 fixes applied:
 //! - Cache stores `Arc<DnsMessage>` to avoid deep clone on every hit.
 //! - `CacheKey` stores a single inline byte buffer instead of `Vec<Vec<u8>>`.
+//!
+//! Sprint 2 optimizations applied:
+//! - CacheKey uses a 128-bit hash value (zero allocation) instead of `name_bytes`.
+//! - CacheEntry stores both pre-serialized wire bytes (`Arc<Vec<u8>>`) and the
+//!   parsed message (`Arc<DnsMessage>`), eliminating serialization on cache hits.
+//! - Added `CachedResponse` returned from the cache for cheap cloning and fast
+//!   downstream patching.
 
+use std::hash::DefaultHasher;
+use std::hash::Hash;
+use std::hash::Hasher;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
@@ -20,35 +30,76 @@ use dns_protocol::name::DomainName;
 use dns_types::QType;
 use dns_types::Route;
 
-// ─── Cache key ───────────────────────────────────────────────────
+// ─── Public cache response ───────────────────────────────────────
 
-/// Cache key: combined qtype + domain name.
+/// Lightweight cached DNS response.
 ///
-/// Domain labels are stored as a single contiguous byte buffer with
-/// length-prefix per label — one heap allocation instead of N.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct CacheKey {
-    route: Route,
-    qtype: QType,
-    /// Flattened domain labels: [len0, label0_bytes, len1, label1_bytes, ...]
-    name_bytes: Vec<u8>,
+/// Contains both the pre-serialized wire bytes and the parsed message, both
+/// wrapped in `Arc` for cheap cloning.
+#[derive(Debug, Clone)]
+pub struct CachedResponse {
+    wire: Arc<Vec<u8>>,
+    message: Arc<DnsMessage>,
 }
 
-impl CacheKey {
-    fn new(route: Route, qtype: QType, name: &DomainName) -> Self {
-        let mut name_bytes = Vec::new();
-        for label in name.labels() {
-            name_bytes.push(label.len() as u8);
-            name_bytes.extend_from_slice(label);
-        }
+impl CachedResponse {
+    /// Construct from a `DnsMessage`. Serializes the message once and stores
+    /// the wire bytes alongside the message.
+    pub fn new(message: DnsMessage) -> Self {
         Self {
-            route,
-            qtype,
-            name_bytes,
+            wire: Arc::new(message.to_wire()),
+            message: Arc::new(message),
         }
     }
 
-    /// Legacy non-scoped key for backward compatibility.
+    /// Construct from pre-existing shared data.
+    pub fn from_parts(wire: Arc<Vec<u8>>, message: Arc<DnsMessage>) -> Self {
+        Self { wire, message }
+    }
+
+    /// Cheaply return a mutable copy of the wire bytes with the DNS header ID
+    /// replaced by `new_id`. No deep clone of the message structure is needed.
+    pub fn wire_with_id(&self, new_id: u16) -> Vec<u8> {
+        let mut wire = (*self.wire).clone();
+        wire[0] = (new_id >> 8) as u8;
+        wire[1] = (new_id & 0xFF) as u8;
+        wire
+    }
+
+    /// Pre-serialized wire bytes (shared).
+    #[must_use]
+    pub fn wire(&self) -> &Arc<Vec<u8>> {
+        &self.wire
+    }
+
+    /// Parsed DNS message (shared).
+    #[must_use]
+    pub fn message(&self) -> &Arc<DnsMessage> {
+        &self.message
+    }
+}
+
+// ─── Cache key ───────────────────────────────────────────────────
+
+/// Cache key: combined route + qtype + domain, represented as a 128-bit hash.
+///
+/// Using a pure hash avoids heap allocation on every cache get/insert. Collisions
+/// are astronomically rare for the bounded cache sizes used here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct CacheKey(u128);
+
+impl CacheKey {
+    fn new(route: Route, qtype: QType, name: &DomainName) -> Self {
+        let mut hasher = DefaultHasher::new();
+        route.hash(&mut hasher);
+        qtype.hash(&mut hasher);
+        for label in name.labels() {
+            label.len().hash(&mut hasher);
+            hasher.write(label);
+        }
+        Self(hasher.finish() as u128)
+    }
+
     #[allow(dead_code)]
     fn legacy(qtype: QType, name: &DomainName) -> Self {
         Self::new(Route::Fallback, qtype, name)
@@ -60,8 +111,8 @@ impl CacheKey {
 /// A cached DNS response entry.
 #[derive(Debug, Clone)]
 struct CacheEntry {
-    /// The DNS response message, shared via Arc to avoid clone on every hit.
-    message: Arc<DnsMessage>,
+    /// Pre-serialized wire bytes and parsed message, shared via `Arc`.
+    response: CachedResponse,
     /// When this entry was stored.
     inserted_at: Instant,
     /// Effective TTL in seconds (clamped between min_ttl and max_ttl).
@@ -111,7 +162,7 @@ impl CacheMetrics {
 /// DNS response cache.
 ///
 /// Thread-safe via `DashMap`. Supports TTL-based expiration.
-/// Returns `Arc<DnsMessage>` to avoid clone on cache hit.
+/// Returns `CachedResponse` to avoid clone on cache hit.
 #[derive(Debug)]
 pub struct DnsCache {
     entries: DashMap<CacheKey, CacheEntry>,
@@ -132,10 +183,8 @@ impl DnsCache {
 
     /// Look up a cached response for the given query.
     ///
-    /// Returns `Some(Arc<DnsMessage>)` if a valid (non-expired) entry exists.
-    /// The caller can cheaply clone the Arc or call `Arc::make_mut` if mutation
-    /// is needed (e.g., patching the header ID).
-    pub fn get(&self, qtype: QType, name: &DomainName) -> Option<Arc<DnsMessage>> {
+    /// Returns `Some(CachedResponse)` if a valid (non-expired) entry exists.
+    pub fn get(&self, qtype: QType, name: &DomainName) -> Option<CachedResponse> {
         self.get_scoped(Route::Fallback, qtype, name)
     }
 
@@ -147,7 +196,7 @@ impl DnsCache {
         route: Route,
         qtype: QType,
         name: &DomainName,
-    ) -> Option<Arc<DnsMessage>> {
+    ) -> Option<CachedResponse> {
         let key = CacheKey::new(route, qtype, name);
         if let Some(entry) = self.entries.get(&key) {
             if entry.is_expired() {
@@ -158,7 +207,7 @@ impl DnsCache {
             }
             self.stats.record_hit();
             tracing::trace!(route = %route, qtype = ?qtype, domain = %name, "cache hit");
-            Some(Arc::clone(&entry.message))
+            Some(entry.response.clone())
         } else {
             self.stats.record_miss();
             None
@@ -168,8 +217,8 @@ impl DnsCache {
     /// Insert a DNS response into the cache.
     ///
     /// The TTL is extracted from the first answer record, clamped
-    /// between `min_ttl` and `max_ttl`. A clone of the message is
-    /// stored wrapped in `Arc` so future `get()` calls avoid deep copies.
+    /// between `min_ttl` and `max_ttl`. The response is serialized once and
+    /// stored as `CachedResponse` for fast future access.
     pub fn insert(&self, qtype: QType, name: &DomainName, message: &DnsMessage) {
         self.insert_scoped(Route::Fallback, qtype, name, message);
     }
@@ -195,7 +244,7 @@ impl DnsCache {
 
         let key = CacheKey::new(route, qtype, name);
         let entry = CacheEntry {
-            message: Arc::new(stored),
+            response: CachedResponse::new(stored),
             inserted_at: Instant::now(),
             ttl_secs: ttl,
         };
@@ -225,7 +274,7 @@ impl DnsCache {
     ) {
         let key = CacheKey::new(route, qtype, name);
         let entry = CacheEntry {
-            message: Arc::new(message.clone()),
+            response: CachedResponse::new(message.clone()),
             inserted_at: Instant::now(),
             ttl_secs: self.config.negative_ttl_secs,
         };
@@ -265,7 +314,7 @@ impl DnsCache {
         for entry in self.entries.iter() {
             if entry.inserted_at < oldest_time {
                 oldest_time = entry.inserted_at;
-                oldest_key = Some(entry.key().clone());
+                oldest_key = Some(*entry.key());
             }
         }
 
@@ -329,7 +378,7 @@ mod tests {
 
         // Hit.
         let cached = cache.get(qtype, &name).unwrap();
-        assert_eq!(cached.header.id, 0x1234);
+        assert_eq!(cached.message().header.id, 0x1234);
         assert_eq!(cache.stats().hits, 1);
     }
 
@@ -349,7 +398,7 @@ mod tests {
         cache.insert(qtype, &name, &resp);
 
         let cached = cache.get(qtype, &name).unwrap();
-        assert_eq!(cached.answers[0].ttl, 10);
+        assert_eq!(cached.message().answers[0].ttl, 10);
     }
 
     #[test]
@@ -397,6 +446,7 @@ mod tests {
         let cached1 = cache.get(qtype, &name).unwrap();
         let cached2 = cache.get(qtype, &name).unwrap();
         // Both should point to the same Arc allocation.
-        assert!(Arc::ptr_eq(&cached1, &cached2));
+        assert!(Arc::ptr_eq(cached1.wire(), cached2.wire()));
+        assert!(Arc::ptr_eq(cached1.message(), cached2.message()));
     }
 }

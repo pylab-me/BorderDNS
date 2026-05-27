@@ -197,8 +197,7 @@ pub async fn run_udp(addr: String, ctx: Arc<RuntimeContext>) -> anyhow::Result<(
                     tokio::spawn(async move {
                         let meta = RequestMeta::new(TransportKind::Udp, Some(peer));
                         let resp = handler::handle_dns_query(&buf, &ctx, &meta).await;
-                        let resp_bytes = resp.to_wire();
-                        if let Err(e) = sock.send_to(&resp_bytes, peer).await {
+                        if let Err(e) = sock.send_to(resp.wire(), peer).await {
                             debug!(error = %e, peer = %peer, "UDP send error");
                         }
                     });
@@ -278,7 +277,7 @@ async fn handle_tcp_connection(
                 Ok(Some((msg_bytes, _))) => {
                     let meta = RequestMeta::new(TransportKind::Tcp, Some(peer));
                     let resp = handler::handle_dns_query(&msg_bytes, &ctx, &meta).await;
-                    let frame = tcp_frame::encode_tcp_frame(&resp.to_wire());
+                    let frame = tcp_frame::encode_tcp_frame(resp.wire());
                     if let Err(e) = timeout(timeout_dur, stream.write_all(&frame)).await {
                         debug!(error = %e, peer = %peer, "TCP write error");
                         return Ok(());
@@ -378,7 +377,7 @@ async fn handle_tls_connection(
                 Ok(Some((msg_bytes, _))) => {
                     let meta = RequestMeta::new(TransportKind::Tls, Some(peer));
                     let resp = handler::handle_dns_query(&msg_bytes, &ctx, &meta).await;
-                    let frame = tcp_frame::encode_tcp_frame(&resp.to_wire());
+                    let frame = tcp_frame::encode_tcp_frame(resp.wire());
                     if let Err(e) = timeout(idle_timeout, tls_stream.write_all(&frame)).await {
                         debug!(error = %e, peer = %peer, "DoT write error");
                         return Ok(());
@@ -471,7 +470,7 @@ async fn doh_get_handler(
     ctx.metrics.https.record_request();
     let meta = RequestMeta::new(TransportKind::Https, None);
     let resp = handler::handle_dns_query(&query_bytes, &ctx, &meta).await;
-    Ok(Bytes::from(resp.to_wire()))
+    Ok(Bytes::from(resp.into_wire()))
 }
 
 /// DoH POST handler: `POST /dns-query` with `application/dns-message`
@@ -497,7 +496,7 @@ async fn doh_post_handler(
     ctx.metrics.https.record_request();
     let meta = RequestMeta::new(TransportKind::Https, None);
     let resp = handler::handle_dns_query(&query_bytes, &ctx, &meta).await;
-    Ok(Bytes::from(resp.to_wire()))
+    Ok(Bytes::from(resp.into_wire()))
 }
 
 /// DoH OPTIONS handler (preflight).
@@ -670,10 +669,10 @@ async fn doj_resolve_handler(
 
     // Resolve through unified pipeline.
     let meta = RequestMeta::new(TransportKind::Json, None);
-    let dns_resp = handler::handle_dns_query(&wire_query, &ctx, &meta).await;
+    let handler_resp = handler::handle_dns_query(&wire_query, &ctx, &meta).await;
 
     // Convert to JSON response.
-    let doj_resp = wire_to_json_response(&dns_name, qtype_val, &dns_resp);
+    let doj_resp = wire_to_json_response(&dns_name, qtype_val, handler_resp.message());
 
     (
         StatusCode::OK,

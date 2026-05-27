@@ -21,6 +21,7 @@ hyper = { workspace = true }
 hyper-util = { workspace = true }
 hyper-rustls = { workspace = true }
 http-body-util = { workspace = true }
+dashmap.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 

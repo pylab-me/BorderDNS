@@ -126,7 +126,7 @@ impl Pipeline {
 
         // ── Stage 3: Cache Lookup (route-scoped) ──────────────
         if let Some(cached) = self.cache.get_scoped(route, qtype, &domain) {
-            let mut resp = (*cached).clone();
+            let mut resp = (**cached.message()).clone();
             resp.header.id = query.header.id;
             let answer_count = resp.answers.len();
             tracing::info!(
