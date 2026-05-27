@@ -40,3 +40,33 @@ min_ttl_secs = 12
 max_ttl_secs = 900
 negative_ttl_secs = 30
 
+# ─── Hosts Override ───────────────────────────────────────────
+# Static domain → IP overrides (like /etc/hosts).
+[hosts]
+enabled = false
+ttl_secs = 60
+# Inline entries:
+# [[hosts.entries]]
+# domain = "blocked.local"
+# ips = ["127.0.0.1"]
+# External hosts files (standard /etc/hosts format):
+# files = ["/etc/hosts"]
+
+# ─── Domain Block ─────────────────────────────────────────────
+# Block DNS requests for matching domains.
+[block]
+enabled = false
+domains = []
+suffixes = []
+blackhole_ipv4 = "0.0.0.0"
+blackhole_ipv6 = "::"
+# suppress_qtypes = ["HTTPS"]
+
+# ─── Blackhole HTTP ───────────────────────────────────────────
+# HTTP listener returning 202 Accepted on redirect ports.
+[blackhole]
+enabled = false
+listen = "0.0.0.0"
+ports = [80, 443]
+max_header_bytes = 32768
+
