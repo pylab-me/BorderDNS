@@ -9,6 +9,7 @@ description = "Facts schema, governance state, event DTOs, and value registry fo
 
 [dependencies]
 dns-types.workspace = true
+dashmap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true

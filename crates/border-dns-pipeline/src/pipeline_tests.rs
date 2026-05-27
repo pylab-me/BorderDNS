@@ -23,11 +23,12 @@ endpoint = "223.5.5.5:53"
     border_dns_config::load_from_str(toml_str).unwrap()
 }
 
-#[test]
-fn test_pipeline_creation() {
+#[tokio::test]
+async fn test_pipeline_creation() {
     let config = Arc::new(test_config());
     let cache = Arc::new(DnsCache::new(config.cache.clone()));
     let knowledge = Arc::new(BuiltInDomainKnowledge::new());
     let geoip = Arc::new(SimpleGeoIp);
-    let _pipeline = Pipeline::new(config, cache, knowledge, geoip);
+    let pipeline = Pipeline::new(config, cache, knowledge, geoip);
+    assert!(pipeline.governance_store().is_empty());
 }

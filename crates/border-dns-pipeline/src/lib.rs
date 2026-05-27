@@ -11,9 +11,20 @@ use std::time::Instant;
 use border_dns_cache::DnsCache;
 use border_dns_config::Config;
 use border_dns_domain_knowledge::BuiltInDomainKnowledge;
+use border_dns_facts::FactEmit;
+use border_dns_facts::GovernancePhase;
+use border_dns_facts::GovernanceStore;
+use border_dns_facts::GovernanceThresholds;
+use border_dns_facts::MeaningfulEventKind;
+use border_dns_facts::ObservationJob;
+use border_dns_facts::ObservationJobKind;
 use border_dns_geoip::SimpleGeoIp;
 use border_dns_route_policy::RouteDecision;
 use border_dns_route_policy::RoutePolicy;
+use border_dns_route_policy::governance_transition::GovernanceTransitionInput;
+use border_dns_route_policy::governance_transition::evaluate_governance_transition;
+use border_dns_route_policy::scoring::RouteEvidenceInput;
+use border_dns_route_policy::scoring::score_route_evidence;
 use border_dns_upstream;
 use dns_protocol::header::ResponseCode;
 use dns_protocol::message::DnsMessage;
@@ -54,6 +65,12 @@ pub struct Pipeline {
     domain_knowledge: Arc<BuiltInDomainKnowledge>,
     geoip: Arc<SimpleGeoIp>,
     route_policy: Arc<RoutePolicy>,
+    governance_store: Arc<GovernanceStore>,
+    governance_thresholds: Arc<GovernanceThresholds>,
+    /// Channel sender for fact emissions (non-blocking).
+    fact_tx: tokio::sync::mpsc::UnboundedSender<FactEmit>,
+    /// Channel sender for observation jobs (non-blocking).
+    observation_tx: tokio::sync::mpsc::UnboundedSender<ObservationJob>,
 }
 
 impl Pipeline {
@@ -66,13 +83,57 @@ impl Pipeline {
         geoip: Arc<SimpleGeoIp>,
     ) -> Self {
         let route_policy = Arc::new(RoutePolicy::new(config.resolver.location));
+        let governance_store = Arc::new(GovernanceStore::new());
+        let governance_thresholds = Arc::new(GovernanceThresholds::default());
+        let (fact_tx, _fact_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (observation_tx, _observation_rx) = tokio::sync::mpsc::unbounded_channel();
+
         Self {
             config,
             cache,
             domain_knowledge,
             geoip,
             route_policy,
+            governance_store,
+            governance_thresholds,
+            fact_tx,
+            observation_tx,
         }
+    }
+
+    /// Create a pipeline with governance channels wired externally.
+    ///
+    /// The receivers should be consumed by background workers.
+    #[must_use]
+    pub fn with_governance_channels(
+        config: Arc<Config>,
+        cache: Arc<DnsCache>,
+        domain_knowledge: Arc<BuiltInDomainKnowledge>,
+        geoip: Arc<SimpleGeoIp>,
+        governance_store: Arc<GovernanceStore>,
+        governance_thresholds: Arc<GovernanceThresholds>,
+        fact_tx: tokio::sync::mpsc::UnboundedSender<FactEmit>,
+        observation_tx: tokio::sync::mpsc::UnboundedSender<ObservationJob>,
+    ) -> Self {
+        let route_policy = Arc::new(RoutePolicy::new(config.resolver.location));
+
+        Self {
+            config,
+            cache,
+            domain_knowledge,
+            geoip,
+            route_policy,
+            governance_store,
+            governance_thresholds,
+            fact_tx,
+            observation_tx,
+        }
+    }
+
+    /// Access the governance store (for inspection / admin).
+    #[must_use]
+    pub fn governance_store(&self) -> &Arc<GovernanceStore> {
+        &self.governance_store
     }
 
     /// Execute the full pipeline for a DNS query.
@@ -112,6 +173,19 @@ impl Pipeline {
             .decide_by_domain_prior(&domain_str, &*self.domain_knowledge);
         let route = decision.execution_route;
 
+        // ── Stage 2.5: Governance State ────────────────────────
+        let prior_route_str = match route {
+            Route::China => "china",
+            Route::Foreign => "foreign",
+            Route::Bootstrap => "bootstrap",
+            Route::Fallback => "unknown",
+        };
+        let gov_state = self
+            .governance_store
+            .get_or_create(&domain_str, prior_route_str);
+        let is_first_seen =
+            gov_state.observation_count == 0 && gov_state.phase == GovernancePhase::New;
+
         tracing::info!(
             transport = %meta.transport,
             peer = ?meta.peer_addr,
@@ -121,6 +195,7 @@ impl Pipeline {
             route = %route,
             route_source = %decision.route_source.as_str(),
             confidence = %decision.confidence.as_str(),
+            gov_phase = %gov_state.phase,
             "QUERY"
         );
 
@@ -163,6 +238,91 @@ impl Pipeline {
                 self.route_policy
                     .refine_by_answer_geo(&mut final_decision, &evidence);
 
+                // ── Stage 5.5: Scoring Engine ──────────────────
+                let score_input = RouteEvidenceInput {
+                    prior_route: prior_route_str.to_string(),
+                    local_cn_ip_count: evidence.cn_count as u32,
+                    local_foreign_ip_count: evidence.foreign_count as u32,
+                    ..RouteEvidenceInput::default()
+                };
+                let score = score_route_evidence(&score_input);
+
+                // ── Stage 5.6: Governance Transition ───────────
+                let gov_input = GovernanceTransitionInput {
+                    state: (*gov_state).clone(),
+                    latest_can_promote: score.can_promote,
+                    latest_is_mixed: evidence.cn_count > 0 && evidence.foreign_count > 0,
+                    latest_tls_mismatch: false,
+                    latest_hard_conflict: false,
+                    latest_soft_conflict: false,
+                    latest_local_aligned: score.can_promote,
+                    latest_third_party_aligned: false,
+                    is_first_seen,
+                    upstream_failure: false,
+                    thresholds: (*self.governance_thresholds).clone(),
+                };
+                let transition = evaluate_governance_transition(&gov_input);
+
+                // Update governance state if phase changed
+                if transition.phase_changed || is_first_seen {
+                    let mut new_state = (*gov_state).clone();
+                    new_state.phase = transition.new_phase.clone();
+                    new_state.observation_count += 1;
+                    new_state.china_score = score.china_score;
+                    new_state.foreign_score = score.foreign_score;
+                    new_state.score_margin = score.score_margin;
+                    new_state.can_promote = score.can_promote;
+                    new_state.state_version += 1;
+                    self.governance_store.force_update(&domain_str, new_state);
+
+                    // Emit meaningful event
+                    let event_kind = if is_first_seen {
+                        MeaningfulEventKind::FirstSeenDomain
+                    } else {
+                        MeaningfulEventKind::PhaseChanged
+                    };
+                    let mut fact = FactEmit::new(
+                        domain_str.clone(),
+                        event_kind,
+                        transition.reason_code.to_string(),
+                    );
+                    fact.phase_changed = true;
+                    fact.new_phase = Some(transition.new_phase.clone());
+                    let _ = self.fact_tx.send(fact);
+                }
+
+                // Enqueue observation job if we have IPs to analyze
+                if evidence.cn_count + evidence.foreign_count > 0 {
+                    let ip_addrs: Vec<String> = upstream_resp
+                        .message
+                        .answers
+                        .iter()
+                        .filter_map(|rr| {
+                            use dns_protocol::rr::RData;
+                            match &rr.rdata {
+                                RData::A(a) => Some(a.to_string()),
+                                RData::AAAA(a) => Some(a.to_string()),
+                                _ => None,
+                            }
+                        })
+                        .collect();
+
+                    if !ip_addrs.is_empty() {
+                        let job = ObservationJob {
+                            job_id: format!("geo-{}-{}", domain_str, id),
+                            domain: domain_str.clone(),
+                            job_kind: ObservationJobKind::GeoAnalysis {
+                                ip_addresses: ip_addrs,
+                                cname_chain: Vec::new(),
+                            },
+                            current_phase: transition.new_phase,
+                            current_route: prior_route_str.to_string(),
+                            enqueued_at: chrono::Utc::now(),
+                        };
+                        let _ = self.observation_tx.send(job);
+                    }
+                }
+
                 // ── Stage 6: Answer Selection ──────────────────
                 let selected_answers = self.route_policy.select_answer_candidates(
                     &upstream_resp.message.answers,
@@ -186,6 +346,10 @@ impl Pipeline {
                     upstream_rtt_ms = upstream_resp.rtt.as_millis(),
                     latency_ms = elapsed.as_millis(),
                     source = "upstream",
+                    gov_phase = %transition.new_phase,
+                    china_score = score.china_score,
+                    foreign_score = score.foreign_score,
+                    score_margin = score.score_margin,
                     "RESP"
                 );
 
@@ -199,6 +363,21 @@ impl Pipeline {
             }
             Err(e) => {
                 let elapsed = total_start.elapsed();
+
+                // Enqueue failure observation job
+                let job = ObservationJob {
+                    job_id: format!("fail-{}-{}", domain_str, id),
+                    domain: domain_str.clone(),
+                    job_kind: ObservationJobKind::GeoAnalysis {
+                        ip_addresses: Vec::new(),
+                        cname_chain: Vec::new(),
+                    },
+                    current_phase: gov_state.phase.clone(),
+                    current_route: prior_route_str.to_string(),
+                    enqueued_at: chrono::Utc::now(),
+                };
+                let _ = self.observation_tx.send(job);
+
                 tracing::error!(
                     transport = %meta.transport,
                     peer = ?meta.peer_addr,

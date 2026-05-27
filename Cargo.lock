@@ -246,6 +246,7 @@ name = "border-dns-facts"
 version = "0.2.2"
 dependencies = [
  "chrono",
+ "dashmap",
  "dns-types",
  "serde",
  "serde_json",
@@ -266,13 +267,16 @@ dependencies = [
  "border-dns-cache",
  "border-dns-config",
  "border-dns-domain-knowledge",
+ "border-dns-facts",
  "border-dns-geoip",
  "border-dns-route-policy",
  "border-dns-upstream",
+ "chrono",
  "dns-protocol",
  "dns-transport",
  "dns-types",
  "serde",
+ "tokio",
  "tracing",
 ]
 

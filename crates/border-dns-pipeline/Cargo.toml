@@ -17,6 +17,9 @@ border-dns-upstream.workspace = true
 border-dns-domain-knowledge.workspace = true
 border-dns-geoip.workspace = true
 border-dns-route-policy.workspace = true
+border-dns-facts.workspace = true
+chrono.workspace = true
+tokio.workspace = true
 serde.workspace = true
 tracing.workspace = true
 
