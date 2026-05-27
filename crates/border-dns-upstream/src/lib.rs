@@ -8,10 +8,10 @@ use std::time::Duration;
 
 use border_dns_config::DnsProtocol;
 use border_dns_config::UpstreamServer;
-use border_dns_protocol::message::DnsMessage;
-use border_dns_protocol::message::MAX_EDNS_MESSAGE_SIZE;
-use border_dns_protocol::tcp_frame;
-use border_dns_protocol::tcp_frame::DEFAULT_MAX_TCP_FRAME;
+use dns_protocol::message::DnsMessage;
+use dns_protocol::message::MAX_EDNS_MESSAGE_SIZE;
+use dns_protocol::tcp_frame;
+use dns_protocol::tcp_frame::DEFAULT_MAX_TCP_FRAME;
 use thiserror::Error;
 use tokio::net::UdpSocket;
 use tokio::time::timeout;

@@ -3,8 +3,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use border_dns_protocol::message::DnsMessage;
-use border_dns_protocol::tcp_frame;
+use dns_protocol::message::DnsMessage;
+use dns_protocol::tcp_frame;
 use tokio::net::UdpSocket;
 use tokio::time::timeout;
 use tracing::debug;
@@ -65,7 +65,7 @@ async fn handle_udp_query(
         None => {
             // Respond with FormErr for queries with no question.
             let mut resp = DnsMessage::response(&query);
-            resp.header.rcode = border_dns_protocol::header::ResponseCode::FormErr;
+            resp.header.rcode = dns_protocol::header::ResponseCode::FormErr;
             let resp_bytes = resp.to_wire();
             socket.send_to(&resp_bytes, peer).await?;
             return Ok(());
@@ -92,7 +92,7 @@ async fn handle_udp_query(
         Ok(Err(e)) => {
             warn!(error = %e, domain = %domain, "upstream failed");
             let mut resp = DnsMessage::response(&query);
-            resp.header.rcode = border_dns_protocol::header::ResponseCode::ServFail;
+            resp.header.rcode = dns_protocol::header::ResponseCode::ServFail;
             let resp_bytes = resp.to_wire();
             socket.send_to(&resp_bytes, peer).await?;
             return Ok(());
@@ -100,7 +100,7 @@ async fn handle_udp_query(
         Err(_) => {
             warn!(domain = %domain, "upstream timeout");
             let mut resp = DnsMessage::response(&query);
-            resp.header.rcode = border_dns_protocol::header::ResponseCode::ServFail;
+            resp.header.rcode = dns_protocol::header::ResponseCode::ServFail;
             let resp_bytes = resp.to_wire();
             socket.send_to(&resp_bytes, peer).await?;
             return Ok(());
@@ -108,7 +108,7 @@ async fn handle_udp_query(
     };
 
     // Cache the response.
-    if resp.message.header.rcode == border_dns_protocol::header::ResponseCode::NoError
+    if resp.message.header.rcode == dns_protocol::header::ResponseCode::NoError
         && !resp.message.answers.is_empty()
     {
         ctx.cache.insert(qtype, &domain, resp.message.clone());
@@ -208,7 +208,7 @@ async fn handle_tcp_query(query_bytes: Vec<u8>, ctx: &Arc<RuntimeContext>) -> Ve
         Some(q) => (q.qtype, q.qname.clone()),
         None => {
             let mut resp = DnsMessage::response(&query);
-            resp.header.rcode = border_dns_protocol::header::ResponseCode::FormErr;
+            resp.header.rcode = dns_protocol::header::ResponseCode::FormErr;
             return resp.to_wire();
         }
     };
@@ -224,7 +224,7 @@ async fn handle_tcp_query(query_bytes: Vec<u8>, ctx: &Arc<RuntimeContext>) -> Ve
     let timeout_dur = Duration::from_secs(ctx.config.server.request_timeout_secs);
     match border_dns_upstream::forward(&query, &ctx.config.upstreams.default, timeout_dur).await {
         Ok(resp) => {
-            if resp.message.header.rcode == border_dns_protocol::header::ResponseCode::NoError
+            if resp.message.header.rcode == dns_protocol::header::ResponseCode::NoError
                 && !resp.message.answers.is_empty()
             {
                 ctx.cache.insert(qtype, &domain, resp.message.clone());
@@ -234,7 +234,7 @@ async fn handle_tcp_query(query_bytes: Vec<u8>, ctx: &Arc<RuntimeContext>) -> Ve
         Err(e) => {
             warn!(error = %e, domain = %domain, "TCP upstream failed");
             let mut resp = DnsMessage::response(&query);
-            resp.header.rcode = border_dns_protocol::header::ResponseCode::ServFail;
+            resp.header.rcode = dns_protocol::header::ResponseCode::ServFail;
             resp.to_wire()
         }
     }

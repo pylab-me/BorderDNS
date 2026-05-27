@@ -78,9 +78,9 @@ name = "border-dns-cache"
 version = "0.1.0"
 dependencies = [
  "border-dns-config",
- "border-dns-protocol",
  "border-dns-types",
  "dashmap",
+ "dns-protocol",
  "tracing",
 ]
 
@@ -108,24 +108,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "border-dns-protocol"
-version = "0.1.0"
-dependencies = [
- "border-dns-types",
- "bytes",
- "thiserror",
-]
-
-[[package]]
 name = "border-dns-runtime"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "border-dns-cache",
  "border-dns-config",
- "border-dns-protocol",
  "border-dns-types",
  "border-dns-upstream",
+ "dns-protocol",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -143,9 +134,9 @@ name = "border-dns-upstream"
 version = "0.1.0"
 dependencies = [
  "border-dns-config",
- "border-dns-protocol",
  "border-dns-types",
  "bytes",
+ "dns-protocol",
  "thiserror",
  "tokio",
  "tracing",
@@ -236,6 +227,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
 dependencies = [
  "powerfmt",
+]
+
+[[package]]
+name = "dns-protocol"
+version = "0.1.0"
+dependencies = [
+ "border-dns-types",
+ "bytes",
+ "thiserror",
 ]
 
 [[package]]
