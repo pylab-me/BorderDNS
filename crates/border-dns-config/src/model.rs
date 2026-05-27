@@ -971,6 +971,7 @@ endpoint = "223.5.5.5:53"
                 }],
                 china: Vec::new(),
                 foreign: Vec::new(),
+                bootstrap: Vec::new(),
             },
             cache: CacheConfig::default(),
             resolver: ResolverConfig::default(),

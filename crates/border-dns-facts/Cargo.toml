@@ -1,0 +1,17 @@
+[package]
+name = "border-dns-facts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Facts schema, governance state, event DTOs, and value registry for BorderDNS facts-aware governance loop."
+
+[dependencies]
+dns-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+
+[lints]
+workspace = true

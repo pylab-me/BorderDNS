@@ -11,6 +11,7 @@ description = "Route decision and scoring logic for BorderDNS: geo-first, latenc
 dns-types.workspace = true
 border-dns-domain-knowledge.workspace = true
 border-dns-geoip.workspace = true
+border-dns-facts.workspace = true
 dns-protocol.workspace = true
 serde.workspace = true
 
