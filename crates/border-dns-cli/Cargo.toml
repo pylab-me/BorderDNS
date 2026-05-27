@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "CLI entrypoint for BorderDNS: run, validate-config, inspect-cache."
+description = "CLI entrypoint for BorderDNS: run, validate-config, inspect-cache, inspect-domain, inspect-governance."
 
 [[bin]]
 name = "border-dns"
@@ -19,10 +19,17 @@ path = "src/main.rs"
 border-dns-config.workspace = true
 border-dns-cache.workspace = true
 border-dns-runtime.workspace = true
+border-dns-domain-knowledge.workspace = true
+border-dns-geoip.workspace = true
+border-dns-route-policy.workspace = true
+border-dns-facts.workspace = true
+dns-types.workspace = true
+chrono.workspace = true
 clap.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 anyhow.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true
