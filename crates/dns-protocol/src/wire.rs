@@ -3,7 +3,7 @@
 //! `WireReader` wraps a byte slice and tracks read position. All multi-byte
 //! integers are read in network byte order (big-endian) per RFC 1035.
 
-use border_dns_types::ProtocolError;
+use dns_types::ProtocolError;
 
 // Maximum depth for compression pointer chains (referenced by name module).
 

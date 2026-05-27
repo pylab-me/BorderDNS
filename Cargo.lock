@@ -78,9 +78,9 @@ name = "border-dns-cache"
 version = "0.1.0"
 dependencies = [
  "border-dns-config",
- "border-dns-types",
  "dashmap",
  "dns-protocol",
+ "dns-types",
  "tracing",
 ]
 
@@ -101,7 +101,7 @@ dependencies = [
 name = "border-dns-config"
 version = "0.1.0"
 dependencies = [
- "border-dns-types",
+ "dns-types",
  "serde",
  "thiserror",
  "toml",
@@ -114,19 +114,12 @@ dependencies = [
  "anyhow",
  "border-dns-cache",
  "border-dns-config",
- "border-dns-types",
  "border-dns-upstream",
  "dns-protocol",
+ "dns-types",
  "tokio",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "border-dns-types"
-version = "0.1.0"
-dependencies = [
- "thiserror",
 ]
 
 [[package]]
@@ -134,9 +127,9 @@ name = "border-dns-upstream"
 version = "0.1.0"
 dependencies = [
  "border-dns-config",
- "border-dns-types",
  "bytes",
  "dns-protocol",
+ "dns-types",
  "thiserror",
  "tokio",
  "tracing",
@@ -233,8 +226,15 @@ dependencies = [
 name = "dns-protocol"
 version = "0.1.0"
 dependencies = [
- "border-dns-types",
  "bytes",
+ "dns-types",
+ "thiserror",
+]
+
+[[package]]
+name = "dns-types"
+version = "0.1.0"
+dependencies = [
  "thiserror",
 ]
 

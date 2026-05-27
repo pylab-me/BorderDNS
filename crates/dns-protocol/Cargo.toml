@@ -8,7 +8,7 @@ authors.workspace = true
 description = "DNS protocol wire codec: message decode/encode, name compression, EDNS, SVCB/HTTPS, TCP framing."
 
 [dependencies]
-border-dns-types.workspace = true
+dns-types.workspace = true
 thiserror.workspace = true
 bytes.workspace = true
 

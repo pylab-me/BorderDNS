@@ -3,7 +3,7 @@
 //! A complete DNS message consists of Header, Question, Answer, Authority,
 //! and Additional sections.
 
-use border_dns_types::ProtocolError;
+use dns_types::ProtocolError;
 
 use crate::header::DnsHeader;
 use crate::question::DnsQuestion;
@@ -200,10 +200,10 @@ impl DnsMessage {
 mod tests {
     use std::net::Ipv4Addr;
 
-    use border_dns_types::QClass;
-    use border_dns_types::QType;
-    use border_dns_types::RecordClass;
-    use border_dns_types::RecordType;
+    use dns_types::QClass;
+    use dns_types::QType;
+    use dns_types::RecordClass;
+    use dns_types::RecordType;
 
     use super::*;
     use crate::name::DomainName;

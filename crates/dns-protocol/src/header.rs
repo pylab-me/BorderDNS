@@ -3,7 +3,7 @@
 //! The header is always present and includes fields for message identification,
 //! flags, and section counts.
 
-use border_dns_types::ProtocolError;
+use dns_types::ProtocolError;
 
 use crate::wire::WireReader;
 use crate::wire::WireWriter;

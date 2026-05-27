@@ -8,7 +8,7 @@ authors.workspace = true
 description = "Configuration model and validation for BorderDNS runtime."
 
 [dependencies]
-border-dns-types.workspace = true
+dns-types.workspace = true
 serde.workspace = true
 toml.workspace = true
 thiserror.workspace = true

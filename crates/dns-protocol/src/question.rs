@@ -2,9 +2,9 @@
 //!
 //! The question section contains QDCOUNT entries, each with QNAME, QTYPE, and QCLASS.
 
-use border_dns_types::ProtocolError;
-use border_dns_types::QClass;
-use border_dns_types::QType;
+use dns_types::ProtocolError;
+use dns_types::QClass;
+use dns_types::QType;
 
 use crate::name::DomainName;
 use crate::name::read_name;
@@ -73,7 +73,7 @@ impl DnsQuestion {
 
 #[cfg(test)]
 mod tests {
-    use border_dns_types::RecordType;
+    use dns_types::RecordType;
 
     use super::*;
 
@@ -82,7 +82,7 @@ mod tests {
         let q = DnsQuestion::new(
             DomainName::from_str("www.example.com").unwrap(),
             QType::Type(RecordType::A),
-            QClass::Class(border_dns_types::RecordClass::In),
+            QClass::Class(dns_types::RecordClass::In),
         );
 
         let mut writer = WireWriter::new();

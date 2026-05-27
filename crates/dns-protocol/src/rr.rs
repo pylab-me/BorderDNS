@@ -6,9 +6,9 @@
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 
-use border_dns_types::ProtocolError;
-use border_dns_types::RecordClass;
-use border_dns_types::RecordType;
+use dns_types::ProtocolError;
+use dns_types::RecordClass;
+use dns_types::RecordType;
 
 use crate::name::read_name;
 use crate::name::write_name_uncompressed;

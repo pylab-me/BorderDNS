@@ -1,5 +1,5 @@
 [package]
-name = "border-dns-types"
+name = "dns-types"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -77,7 +77,7 @@ pub fn dot_encode_frame(dns_message: &[u8]) -> Vec<u8> {
 pub fn dot_decode_frame(
     data: &[u8],
     max_frame_size: u16,
-) -> Result<(&[u8], usize), border_dns_types::ProtocolError> {
+) -> Result<(&[u8], usize), dns_types::ProtocolError> {
     tcp_frame::decode_tcp_frame(data, max_frame_size)
 }
 

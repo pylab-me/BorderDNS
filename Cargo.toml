@@ -2,7 +2,7 @@
 resolver = "2"
 
 members = [
-    "crates/border-dns-types",
+    "crates/dns-types",
     "crates/dns-protocol",
     "crates/border-dns-config",
     "crates/border-dns-cache",
@@ -12,12 +12,12 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 rust-version = "1.88"
 license = "Apache-2.0"
 authors = ["pylab-me"]
-repository = "https://github.com/pylab-me/border-dns"
+repository = "https://github.com/pylab-me/BorderDNS"
 description = "BorderDNS Rust runtime: facts-aware DNS governance loop."
 keywords = ["dns", "resolver", "geoip", "routing", "observability"]
 categories = ["network-programming"]
@@ -27,7 +27,7 @@ categories = ["network-programming"]
 # Internal crates
 # ─────────────────────────────────────────────────────────────
 
-border-dns-types = { path = "crates/border-dns-types" }
+dns-types = { path = "crates/dns-types" }
 dns-protocol = { path = "crates/dns-protocol" }
 border-dns-config = { path = "crates/border-dns-config" }
 border-dns-cache = { path = "crates/border-dns-cache" }

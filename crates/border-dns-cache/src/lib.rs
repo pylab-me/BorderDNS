@@ -5,10 +5,10 @@
 
 use std::time::Instant;
 
-use border_dns_types::QType;
 use dashmap::DashMap;
 use dns_protocol::message::DnsMessage;
 use dns_protocol::name::DomainName;
+use dns_types::QType;
 
 /// Cache key: combined qtype + domain name.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -226,12 +226,12 @@ fn extract_min_ttl(message: &DnsMessage) -> u32 {
 mod tests {
     use std::net::Ipv4Addr;
 
-    use border_dns_types::QClass;
-    use border_dns_types::RecordClass;
-    use border_dns_types::RecordType;
     use dns_protocol::question::DnsQuestion;
     use dns_protocol::rr::RData;
     use dns_protocol::rr::ResourceRecord;
+    use dns_types::QClass;
+    use dns_types::RecordClass;
+    use dns_types::RecordType;
 
     use super::*;
 

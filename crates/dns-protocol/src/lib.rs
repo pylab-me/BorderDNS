@@ -16,7 +16,7 @@ pub mod transport;
 pub mod wire;
 
 // Re-export key types at crate root for convenience.
-pub use border_dns_types as types;
+pub use dns_types as types;
 // Header.
 pub use header::{DnsHeader, OpCode, ResponseCode};
 // Message.

@@ -8,7 +8,7 @@ authors.workspace = true
 description = "DNS TTL cache with basic metrics for BorderDNS runtime."
 
 [dependencies]
-border-dns-types.workspace = true
+dns-types.workspace = true
 dns-protocol.workspace = true
 border-dns-config.workspace = true
 dashmap.workspace = true

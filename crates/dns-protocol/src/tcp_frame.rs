@@ -9,7 +9,7 @@
 ///     |          Length (2 bytes)     |       DNS Message        |
 ///     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
 /// ```
-use border_dns_types::ProtocolError;
+use dns_types::ProtocolError;
 
 /// Default maximum TCP DNS frame size (65535 bytes).
 pub const DEFAULT_MAX_TCP_FRAME: u16 = u16::MAX;

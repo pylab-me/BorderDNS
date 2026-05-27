@@ -5,9 +5,9 @@
 
 use std::fmt;
 
-use border_dns_types::MAX_LABEL_COUNT;
-use border_dns_types::MAX_LABEL_LENGTH;
-use border_dns_types::ProtocolError;
+use dns_types::MAX_LABEL_COUNT;
+use dns_types::MAX_LABEL_LENGTH;
+use dns_types::ProtocolError;
 
 use crate::wire::WireReader;
 use crate::wire::WireWriter;
