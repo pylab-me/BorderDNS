@@ -12,6 +12,7 @@ dns-types.workspace = true
 dns-protocol.workspace = true
 dns-transport.workspace = true
 border-dns-config.workspace = true
+futures.workspace = true
 tokio.workspace = true
 tokio-rustls.workspace = true
 rustls.workspace = true

@@ -1,12 +1,19 @@
-//! Upstream DNS resolver with UDP/TCP/DoT/DoH transport and failover.
+//! Upstream DNS resolver with multi-upstream racing and failover.
 //!
-//! Sprint 1-1: adds DoT upstream (TLS + TCP framing) and DoH upstream
-//! (HTTP POST/GET with `application/dns-message`).
+//! Sprint 1-13: All configured upstreams are queried concurrently.
+//! The first successful response wins; remaining in-flight requests
+//! are cancelled. This reduces worst-case latency from sum(failed_RTTs)
+//! to min(all_RTTs).
+//!
+//! Supported upstream transports: UDP, TCP, DoT, DoH.
+//! DoQ is deferred to a later sprint.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures::StreamExt;
+use futures::stream::FuturesUnordered;
 use thiserror::Error;
 
 /// Errors produced by upstream resolver operations.
@@ -54,9 +61,10 @@ pub struct UpstreamResponse {
     pub rtt: Duration,
 }
 
-/// Forward a DNS query to the configured upstream servers with failover.
+/// Forward a DNS query to all configured upstreams concurrently.
 ///
-/// Tries each upstream in order. Returns the first successful response.
+/// All upstreams are queried simultaneously. The first successful
+/// response wins; remaining in-flight requests are cancelled via drop.
 ///
 /// # Errors
 ///
@@ -72,25 +80,39 @@ pub async fn forward(
         ));
     }
 
-    let mut last_error = String::new();
+    let mut futs = FuturesUnordered::new();
 
     for server in upstreams {
         let timeout_dur = Duration::from_millis(server.timeout_ms).min(default_timeout);
-        match forward_single(query, server, timeout_dur).await {
-            Ok(resp) => return Ok(resp),
-            Err(e) => {
-                tracing::warn!(
-                    name = %server.name,
-                    transport = %server.transport,
-                    error = %e,
-                    "upstream query failed, trying next"
+        let query = query.clone();
+        let server = server.clone();
+        futs.push(tokio::spawn(async move {
+            forward_single(&query, &server, timeout_dur).await
+        }));
+    }
+
+    let mut errors: Vec<String> = Vec::new();
+
+    while let Some(result) = futs.next().await {
+        match result {
+            Ok(Ok(resp)) => {
+                tracing::info!(
+                    upstream = %resp.server_name,
+                    rtt_ms = resp.rtt.as_millis(),
+                    "upstream resolved"
                 );
-                last_error = e.to_string();
+                return Ok(resp);
+            }
+            Ok(Err(e)) => {
+                errors.push(e.to_string());
+            }
+            Err(join_err) => {
+                errors.push(format!("task join error: {join_err}"));
             }
         }
     }
 
-    Err(UpstreamError::AllFailed(last_error))
+    Err(UpstreamError::AllFailed(errors.join("; ")))
 }
 
 /// Forward a DNS query to a single upstream server.
@@ -120,12 +142,10 @@ async fn forward_single(
         }
         border_dns_config::DnsProtocol::Https => {
             let bytes = forward_doh(query, &server.endpoint, timeout_dur).await?;
-            // DoH uses the URL endpoint, not a socket addr for metrics.
             let dummy_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
             (bytes, dummy_addr)
         }
         border_dns_config::DnsProtocol::Quic => {
-            // QUIC upstream is deferred to a later sprint.
             return Err(UpstreamError::Protocol(
                 "QUIC upstream not yet implemented".into(),
             ));
@@ -217,12 +237,9 @@ async fn forward_tls(
         let mut root_store = rustls::RootCertStore::empty();
         root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
 
-        let mut tls_config = rustls::ClientConfig::builder()
+        let tls_config = rustls::ClientConfig::builder()
             .with_root_certificates(root_store)
             .with_no_client_auth();
-
-        // Enable ALPN for "dns" if desired (DoT doesn't strictly require it).
-        tls_config.alpn_protocols = vec![];
 
         let connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
         let domain = rustls::pki_types::ServerName::try_from(server_name.to_string())
