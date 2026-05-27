@@ -1,0 +1,26 @@
+[server]
+listen = [
+    "udp://0.0.0.0:5353",
+    "tcp://0.0.0.0:5353",
+]
+max_concurrent = 1024
+request_timeout_secs = 5
+
+[[upstreams.default]]
+addr = "223.5.5.5:53"
+protocol = "udp"
+timeout_secs = 3
+
+[[upstreams.default]]
+addr = "1.1.1.1:53"
+protocol = "udp"
+timeout_secs = 3
+
+[cache]
+max_entries = 4096
+min_ttl_secs = 5
+max_ttl_secs = 86400
+negative_ttl_secs = 30
+
+[resolver]
+location = "unknown"

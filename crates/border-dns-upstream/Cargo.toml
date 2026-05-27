@@ -1,0 +1,20 @@
+[package]
+name = "border-dns-upstream"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Upstream DNS resolver with UDP/TCP transport and failover for BorderDNS runtime."
+
+[dependencies]
+border-dns-types.workspace = true
+border-dns-protocol.workspace = true
+border-dns-config.workspace = true
+tokio.workspace = true
+bytes.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

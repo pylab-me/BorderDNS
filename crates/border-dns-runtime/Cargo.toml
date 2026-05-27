@@ -1,0 +1,22 @@
+[package]
+name = "border-dns-runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Production DNS runtime: UDP/TCP servers, bootstrap, graceful shutdown."
+
+[dependencies]
+border-dns-types.workspace = true
+border-dns-protocol.workspace = true
+border-dns-config.workspace = true
+border-dns-cache.workspace = true
+border-dns-upstream.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+
+[lints]
+workspace = true

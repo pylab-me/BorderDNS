@@ -1,0 +1,24 @@
+[package]
+name = "border-dns-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "CLI entrypoint for BorderDNS: run, validate-config, inspect-cache."
+
+[[bin]]
+name = "border-dns"
+path = "src/main.rs"
+
+[dependencies]
+border-dns-config.workspace = true
+border-dns-cache.workspace = true
+border-dns-runtime.workspace = true
+clap.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+
+[lints]
+workspace = true

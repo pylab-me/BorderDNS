@@ -1,0 +1,18 @@
+[package]
+name = "border-dns-cache"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "DNS TTL cache with basic metrics for BorderDNS runtime."
+
+[dependencies]
+border-dns-types.workspace = true
+border-dns-protocol.workspace = true
+border-dns-config.workspace = true
+dashmap.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

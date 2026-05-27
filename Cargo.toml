@@ -4,6 +4,11 @@ resolver = "2"
 members = [
     "crates/border-dns-types",
     "crates/border-dns-protocol",
+    "crates/border-dns-config",
+    "crates/border-dns-cache",
+    "crates/border-dns-upstream",
+    "crates/border-dns-runtime",
+    "crates/border-dns-cli",
 ]
 
 [workspace.package]
@@ -24,6 +29,10 @@ categories = ["network-programming"]
 
 border-dns-types = { path = "crates/border-dns-types" }
 border-dns-protocol = { path = "crates/border-dns-protocol" }
+border-dns-config = { path = "crates/border-dns-config" }
+border-dns-cache = { path = "crates/border-dns-cache" }
+border-dns-upstream = { path = "crates/border-dns-upstream" }
+border-dns-runtime = { path = "crates/border-dns-runtime" }
 
 # ─────────────────────────────────────────────────────────────
 # Core dependencies
@@ -31,6 +40,51 @@ border-dns-protocol = { path = "crates/border-dns-protocol" }
 
 bytes = "1"
 thiserror = "2"
+anyhow = "1"
+
+# ─────────────────────────────────────────────────────────────
+# Async runtime / networking
+# ─────────────────────────────────────────────────────────────
+
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "net",
+    "time",
+    "signal",
+    "sync",
+    "io-util",
+] }
+
+# ─────────────────────────────────────────────────────────────
+# Config / serialization
+# ─────────────────────────────────────────────────────────────
+
+serde = { version = "1", features = ["derive"] }
+toml = "1"
+
+# ─────────────────────────────────────────────────────────────
+# CLI
+# ─────────────────────────────────────────────────────────────
+
+clap = { version = "4", features = ["derive"] }
+
+# ─────────────────────────────────────────────────────────────
+# Logging / tracing
+# ─────────────────────────────────────────────────────────────
+
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = [
+    "env-filter",
+    "fmt",
+    "time",
+] }
+
+# ─────────────────────────────────────────────────────────────
+# Concurrent state
+# ─────────────────────────────────────────────────────────────
+
+dashmap = "6"
 
 # ─────────────────────────────────────────────────────────────
 # Testing
