@@ -307,4 +307,5 @@ impl RoutePolicy {
 #[path = "route_policy_tests.rs"]
 mod tests;
 
+pub mod governance_transition;
 pub mod scoring;

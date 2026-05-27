@@ -283,6 +283,7 @@ dependencies = [
  "border-dns-domain-knowledge",
  "border-dns-facts",
  "border-dns-geoip",
+ "chrono",
  "dns-protocol",
  "dns-types",
  "serde",
