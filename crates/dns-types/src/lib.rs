@@ -6,12 +6,21 @@
 mod error;
 mod record_class;
 mod record_type;
+pub mod route;
 
 pub use error::ProtocolError;
 pub use record_class::QClass;
 pub use record_class::RecordClass;
 pub use record_type::QType;
 pub use record_type::RecordType;
+pub use route::CnameHint;
+pub use route::Confidence;
+pub use route::DomainPrior;
+pub use route::IpGeoScope;
+pub use route::ReasonCode;
+pub use route::ResolverLocation;
+pub use route::Route;
+pub use route::RouteSource;
 
 /// Maximum label length as defined by RFC 1035 (63 octets).
 pub const MAX_LABEL_LENGTH: usize = 63;

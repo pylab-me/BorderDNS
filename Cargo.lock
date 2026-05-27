@@ -225,6 +225,50 @@ dependencies = [
 ]
 
 [[package]]
+name = "border-dns-domain-knowledge"
+version = "0.2.1"
+dependencies = [
+ "dns-types",
+ "serde",
+]
+
+[[package]]
+name = "border-dns-geoip"
+version = "0.2.1"
+dependencies = [
+ "dns-types",
+ "serde",
+]
+
+[[package]]
+name = "border-dns-pipeline"
+version = "0.2.1"
+dependencies = [
+ "border-dns-cache",
+ "border-dns-config",
+ "border-dns-domain-knowledge",
+ "border-dns-geoip",
+ "border-dns-route-policy",
+ "border-dns-upstream",
+ "dns-protocol",
+ "dns-transport",
+ "dns-types",
+ "serde",
+ "tracing",
+]
+
+[[package]]
+name = "border-dns-route-policy"
+version = "0.2.1"
+dependencies = [
+ "border-dns-domain-knowledge",
+ "border-dns-geoip",
+ "dns-protocol",
+ "dns-types",
+ "serde",
+]
+
+[[package]]
 name = "border-dns-runtime"
 version = "0.2.1"
 dependencies = [
@@ -400,6 +444,8 @@ dependencies = [
 name = "dns-types"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
  "thiserror",
 ]
 

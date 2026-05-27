@@ -1,0 +1,24 @@
+[package]
+name = "border-dns-pipeline"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "DNS query hot-path orchestration for BorderDNS: route stage, cache stage, upstream stage, aggregation."
+
+[dependencies]
+dns-types.workspace = true
+dns-protocol.workspace = true
+dns-transport.workspace = true
+border-dns-config.workspace = true
+border-dns-cache.workspace = true
+border-dns-upstream.workspace = true
+border-dns-domain-knowledge.workspace = true
+border-dns-geoip.workspace = true
+border-dns-route-policy.workspace = true
+serde.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

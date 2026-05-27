@@ -257,10 +257,40 @@ pub struct DoJListenerConfig {
 // ─── Upstream config ──────────────────────────────────────────────
 
 /// Upstream resolver group configuration.
+///
+/// Supports named upstream groups: `default`, `china`, `foreign`.
+/// Route-aware pipeline selects the upstream group based on the
+/// execution route for each query.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpstreamGroupConfig {
-    /// Default upstream servers.
+    /// Default upstream servers (fallback for all routes).
+    #[serde(default)]
     pub default: Vec<UpstreamServer>,
+    /// China-specific upstream servers (used when route = China).
+    #[serde(default)]
+    pub china: Vec<UpstreamServer>,
+    /// Foreign-specific upstream servers (used when route = Foreign).
+    #[serde(default)]
+    pub foreign: Vec<UpstreamServer>,
+}
+
+impl UpstreamGroupConfig {
+    /// Get upstream servers for a given route.
+    ///
+    /// Falls back to `default` if the route-specific group is empty.
+    #[must_use]
+    pub fn for_route(&self, route: dns_types::Route) -> &[UpstreamServer] {
+        let group = match route {
+            dns_types::Route::China => &self.china,
+            dns_types::Route::Foreign => &self.foreign,
+            dns_types::Route::Bootstrap | dns_types::Route::Fallback => &self.default,
+        };
+        if group.is_empty() {
+            &self.default
+        } else {
+            group
+        }
+    }
 }
 
 /// A single upstream DNS server.
@@ -419,15 +449,15 @@ impl Default for CacheConfig {
 /// Resolver configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResolverConfig {
-    /// Resolver location hint.
-    #[serde(default = "default_location")]
-    pub location: String,
+    /// Resolver location hint — determines default route behavior.
+    #[serde(default)]
+    pub location: dns_types::ResolverLocation,
 }
 
 impl Default for ResolverConfig {
     fn default() -> Self {
         Self {
-            location: default_location(),
+            location: dns_types::ResolverLocation::default(),
         }
     }
 }
@@ -545,10 +575,6 @@ fn default_max_ttl() -> u32 {
 
 fn default_negative_ttl() -> u32 {
     30
-}
-
-fn default_location() -> String {
-    "unknown".into()
 }
 
 // ─── Validation helpers ───────────────────────────────────────────
@@ -816,6 +842,8 @@ default = []
                     server_name: None,
                     timeout_ms: 3000,
                 }],
+                china: Vec::new(),
+                foreign: Vec::new(),
             },
             cache: CacheConfig::default(),
             resolver: ResolverConfig::default(),
@@ -844,7 +872,10 @@ endpoint = "223.5.5.5:53"
         assert_eq!(config.server.default_timeout_ms, 3000);
         assert_eq!(config.server.graceful_shutdown_ms, 5000);
         assert_eq!(config.cache.max_entries, 4096);
-        assert_eq!(config.resolver.location, "unknown");
+        assert_eq!(
+            config.resolver.location,
+            dns_types::ResolverLocation::Unknown
+        );
         assert_eq!(config.upstreams.default[0].transport, DnsProtocol::Udp);
     }
 

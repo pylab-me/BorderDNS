@@ -1,0 +1,15 @@
+[package]
+name = "border-dns-domain-knowledge"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Domain-level business knowledge for BorderDNS routing: CN/foreign domain priors, CNAME hints, global CDN detection."
+
+[dependencies]
+dns-types.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true

@@ -10,10 +10,14 @@ members = [
     "crates/border-dns-upstream",
     "crates/border-dns-runtime",
     "crates/border-dns-cli",
+    "crates/border-dns-domain-knowledge",
+    "crates/border-dns-geoip",
+    "crates/border-dns-route-policy",
+    "crates/border-dns-pipeline",
 ]
 
 [workspace.package]
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 rust-version = "1.88"
 license = "Apache-2.0"
@@ -32,6 +36,10 @@ border-dns-config = { path = "crates/border-dns-config" }
 border-dns-cache = { path = "crates/border-dns-cache" }
 border-dns-upstream = { path = "crates/border-dns-upstream" }
 border-dns-runtime = { path = "crates/border-dns-runtime" }
+border-dns-domain-knowledge = { path = "crates/border-dns-domain-knowledge" }
+border-dns-geoip = { path = "crates/border-dns-geoip" }
+border-dns-route-policy = { path = "crates/border-dns-route-policy" }
+border-dns-pipeline = { path = "crates/border-dns-pipeline" }
 
 # Core dependencies
 bytes = "1"

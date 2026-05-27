@@ -1,3 +1,6 @@
+[resolver]
+location = "china"
+
 [server]
 default_timeout_ms = 5000
 graceful_shutdown_ms = 5000
@@ -10,6 +13,7 @@ listen = "0.0.0.0:5353"
 enabled = true
 listen = "0.0.0.0:5353"
 
+# Default group (fallback for bootstrap / fallback routes)
 [[upstreams.default]]
 name = "alidns"
 endpoint = "223.5.5.5:53"
@@ -18,11 +22,52 @@ endpoint = "223.5.5.5:53"
 name = "cloudflare"
 endpoint = "1.1.1.1:53"
 
+# China group (route = china)
+[[upstreams.china]]
+name = "alidns-tls"
+transport = "tls"
+endpoint = "223.5.5.5:853"
+server_name = "dns.alidns.com"
+timeout_ms = 3000
+
+[[upstreams.china]]
+name = "alidns-https"
+transport = "https"
+endpoint = "https://dns.alidns.com/dns-query"
+server_name = "dns.alidns.com"
+timeout_ms = 3000
+
+[[upstreams.china]]
+name = "alidns-udp"
+transport = "udp"
+endpoint = "223.5.5.5:53"
+timeout_ms = 2000
+
+# Foreign group (route = foreign)
+[[upstreams.foreign]]
+name = "cloudflare-tls"
+transport = "tls"
+endpoint = "1.1.1.1:853"
+server_name = "one.one.one.one"
+timeout_ms = 3000
+
+[[upstreams.foreign]]
+name = "cloudflare-https"
+transport = "https"
+endpoint = "https://cloudflare-dns.com/dns-query"
+server_name = "cloudflare-dns.com"
+timeout_ms = 3000
+
+[[upstreams.foreign]]
+name = "cloudflare-udp"
+transport = "udp"
+endpoint = "1.1.1.1:53"
+timeout_ms = 2000
+
+# Cache
 [cache]
 max_entries = 4096
 min_ttl_secs = 5
 max_ttl_secs = 900
 negative_ttl_secs = 30
 
-[resolver]
-location = "unknown"

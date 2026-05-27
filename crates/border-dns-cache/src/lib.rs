@@ -1,7 +1,9 @@
-//! DNS TTL cache with basic metrics.
+//! DNS TTL cache with route-scoped keys and basic metrics.
 //!
-//! Sprint 1 cache: `qtype + domain` as cache key.
-//! Route-scoped cache is Sprint 2.
+//! Sprint 2: Route-scoped cache prevents answer pollution between
+//! China and foreign resolver views.
+//!
+//! Cache key format: `route:qtype:domain`
 //!
 //! P1 fixes applied:
 //! - Cache stores `Arc<DnsMessage>` to avoid deep clone on every hit.
@@ -16,6 +18,7 @@ use dashmap::DashMap;
 use dns_protocol::message::DnsMessage;
 use dns_protocol::name::DomainName;
 use dns_types::QType;
+use dns_types::Route;
 
 // ─── Cache key ───────────────────────────────────────────────────
 
@@ -25,19 +28,30 @@ use dns_types::QType;
 /// length-prefix per label — one heap allocation instead of N.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct CacheKey {
+    route: Route,
     qtype: QType,
     /// Flattened domain labels: [len0, label0_bytes, len1, label1_bytes, ...]
     name_bytes: Vec<u8>,
 }
 
 impl CacheKey {
-    fn new(qtype: QType, name: &DomainName) -> Self {
+    fn new(route: Route, qtype: QType, name: &DomainName) -> Self {
         let mut name_bytes = Vec::new();
         for label in name.labels() {
             name_bytes.push(label.len() as u8);
             name_bytes.extend_from_slice(label);
         }
-        Self { qtype, name_bytes }
+        Self {
+            route,
+            qtype,
+            name_bytes,
+        }
+    }
+
+    /// Legacy non-scoped key for backward compatibility.
+    #[allow(dead_code)]
+    fn legacy(qtype: QType, name: &DomainName) -> Self {
+        Self::new(Route::Fallback, qtype, name)
     }
 }
 
@@ -122,7 +136,19 @@ impl DnsCache {
     /// The caller can cheaply clone the Arc or call `Arc::make_mut` if mutation
     /// is needed (e.g., patching the header ID).
     pub fn get(&self, qtype: QType, name: &DomainName) -> Option<Arc<DnsMessage>> {
-        let key = CacheKey::new(qtype, name);
+        self.get_scoped(Route::Fallback, qtype, name)
+    }
+
+    /// Look up a cached response for the given query, scoped by route.
+    ///
+    /// Different routes (china/foreign) must never share cache entries.
+    pub fn get_scoped(
+        &self,
+        route: Route,
+        qtype: QType,
+        name: &DomainName,
+    ) -> Option<Arc<DnsMessage>> {
+        let key = CacheKey::new(route, qtype, name);
         if let Some(entry) = self.entries.get(&key) {
             if entry.is_expired() {
                 drop(entry);
@@ -131,7 +157,7 @@ impl DnsCache {
                 return None;
             }
             self.stats.record_hit();
-            tracing::trace!(qtype = ?qtype, domain = %name, "cache hit");
+            tracing::trace!(route = %route, qtype = ?qtype, domain = %name, "cache hit");
             Some(Arc::clone(&entry.message))
         } else {
             self.stats.record_miss();
@@ -145,20 +171,29 @@ impl DnsCache {
     /// between `min_ttl` and `max_ttl`. A clone of the message is
     /// stored wrapped in `Arc` so future `get()` calls avoid deep copies.
     pub fn insert(&self, qtype: QType, name: &DomainName, message: &DnsMessage) {
+        self.insert_scoped(Route::Fallback, qtype, name, message);
+    }
+
+    /// Insert a DNS response into the route-scoped cache.
+    pub fn insert_scoped(
+        &self,
+        route: Route,
+        qtype: QType,
+        name: &DomainName,
+        message: &DnsMessage,
+    ) {
         let ttl = self.clamp_ttl(extract_min_ttl(message));
 
-        // Clone message once and patch TTLs.
         let mut stored = message.clone();
         for rr in &mut stored.answers {
             rr.ttl = ttl;
         }
 
-        // Evict oldest if at capacity.
         if self.entries.len() >= self.config.max_entries {
             self.evict_oldest();
         }
 
-        let key = CacheKey::new(qtype, name);
+        let key = CacheKey::new(route, qtype, name);
         let entry = CacheEntry {
             message: Arc::new(stored),
             inserted_at: Instant::now(),
@@ -166,6 +201,7 @@ impl DnsCache {
         };
         self.entries.insert(key, entry);
         tracing::trace!(
+            route = %route,
             qtype = ?qtype,
             domain = %name,
             ttl = ttl,
@@ -174,8 +210,20 @@ impl DnsCache {
     }
 
     /// Insert a negative cache entry (NXDOMAIN, SERVFAIL, etc.).
+    /// Uses Fallback route for backward compatibility.
     pub fn insert_negative(&self, qtype: QType, name: &DomainName, message: &DnsMessage) {
-        let key = CacheKey::new(qtype, name);
+        self.insert_negative_scoped(Route::Fallback, qtype, name, message);
+    }
+
+    /// Insert a negative cache entry scoped by route.
+    pub fn insert_negative_scoped(
+        &self,
+        route: Route,
+        qtype: QType,
+        name: &DomainName,
+        message: &DnsMessage,
+    ) {
+        let key = CacheKey::new(route, qtype, name);
         let entry = CacheEntry {
             message: Arc::new(message.clone()),
             inserted_at: Instant::now(),
