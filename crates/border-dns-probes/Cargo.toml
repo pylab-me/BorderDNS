@@ -1,0 +1,20 @@
+[package]
+name = "border-dns-probes"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "TLS identity and latency probes for BorderDNS governance loop."
+
+[dependencies]
+dns-types.workspace = true
+border-dns-facts.workspace = true
+tokio.workspace = true
+tokio-rustls.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

@@ -15,6 +15,7 @@ members = [
     "crates/border-dns-route-policy",
     "crates/border-dns-pipeline",
     "crates/border-dns-facts",
+    "crates/border-dns-probes",
 ]
 
 [workspace.package]
@@ -42,6 +43,7 @@ border-dns-geoip = { path = "crates/border-dns-geoip" }
 border-dns-route-policy = { path = "crates/border-dns-route-policy" }
 border-dns-pipeline = { path = "crates/border-dns-pipeline" }
 border-dns-facts = { path = "crates/border-dns-facts" }
+border-dns-probes = { path = "crates/border-dns-probes" }
 
 # Core dependencies
 bytes = "1"

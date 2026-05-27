@@ -281,6 +281,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "border-dns-probes"
+version = "0.2.2"
+dependencies = [
+ "border-dns-facts",
+ "dns-types",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-rustls",
+ "tracing",
+]
+
+[[package]]
 name = "border-dns-route-policy"
 version = "0.2.2"
 dependencies = [
