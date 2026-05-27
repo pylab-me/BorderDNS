@@ -1,20 +1,22 @@
 [server]
-listen = [
-    "udp://0.0.0.0:5353",
-    "tcp://0.0.0.0:5353",
-]
-max_concurrent = 1024
-request_timeout_secs = 5
+default_timeout_ms = 5000
+graceful_shutdown_ms = 10000
+
+[listeners.udp]
+enabled = true
+listen = "0.0.0.0:5353"
+
+[listeners.tcp]
+enabled = true
+listen = "0.0.0.0:5353"
 
 [[upstreams.default]]
-addr = "223.5.5.5:53"
-protocol = "udp"
-timeout_secs = 3
+name = "alidns"
+endpoint = "223.5.5.5:53"
 
 [[upstreams.default]]
-addr = "1.1.1.1:53"
-protocol = "udp"
-timeout_secs = 3
+name = "cloudflare"
+endpoint = "1.1.1.1:53"
 
 [cache]
 max_entries = 4096

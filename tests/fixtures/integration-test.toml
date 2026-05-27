@@ -1,0 +1,144 @@
+# ================================================================
+# BorderDNS Integration Test Configuration
+# Multi-upstream: AliDNS + Cloudflare (DoT / DoH)
+# ================================================================
+
+[server]
+default_timeout_ms = 5000
+graceful_shutdown_ms = 10000
+max_concurrent = 1024
+
+# ─── Listeners ───────────────────────────────────────────────────
+
+[listeners.udp]
+enabled = true
+listen = "0.0.0.0:5353"
+
+[listeners.tcp]
+enabled = true
+listen = "0.0.0.0:5353"
+
+# DoT inbound (optional, uncomment to test)
+# [listeners.dot]
+# enabled = true
+# listen = "0.0.0.0:8853"
+# cert_file = "./certs/server.crt"
+# key_file = "./certs/server.key"
+# idle_timeout_ms = 30000
+
+# DoH inbound (optional, uncomment to test)
+# [listeners.doh]
+# enabled = true
+# listen = "0.0.0.0:8443"
+# path = "/dns-query"
+# cert_file = "./certs/server.crt"
+# key_file = "./certs/server.key"
+
+# DoJ inbound (optional, uncomment to test)
+# [listeners.doj]
+# enabled = true
+# listen = "0.0.0.0:8080"
+# path = "/resolve"
+# profile = "borderdns"
+
+# ─── Upstreams ───────────────────────────────────────────────────
+# Failover order: AliDNS DoH → AliDNS DoT → Cloudflare DoH → Cloudflare DoT
+# Each upstream is tried in order; first success wins.
+
+# --- AliDNS DoT (DNS over TLS) ---
+
+[[upstreams.default]]
+name = "alidns-dot-ipv4-1"
+transport = "tls"
+endpoint = "223.5.5.5:853"
+server_name = "dns.alidns.com"
+timeout_ms = 3000
+
+[[upstreams.default]]
+name = "alidns-dot-ipv4-2"
+transport = "tls"
+endpoint = "223.6.6.6:853"
+server_name = "dns.alidns.com"
+timeout_ms = 3000
+
+[[upstreams.default]]
+name = "alidns-dot-ipv6-1"
+transport = "tls"
+endpoint = "[2400:3200::1]:853"
+server_name = "dns.alidns.com"
+timeout_ms = 3000
+
+[[upstreams.default]]
+name = "alidns-dot-ipv6-2"
+transport = "tls"
+endpoint = "[2400:3200:baba::1]:853"
+server_name = "dns.alidns.com"
+timeout_ms = 3000
+
+# --- AliDNS DoH (DNS over HTTPS) ---
+
+[[upstreams.default]]
+name = "alidns-doh"
+transport = "https"
+endpoint = "https://dns.alidns.com/dns-query"
+server_name = "dns.alidns.com"
+timeout_ms = 3000
+
+# --- Cloudflare DoT (DNS over TLS) ---
+
+[[upstreams.default]]
+name = "cloudflare-dot-ipv4-1"
+transport = "tls"
+endpoint = "1.1.1.1:853"
+server_name = "one.one.one.one"
+timeout_ms = 3000
+
+[[upstreams.default]]
+name = "cloudflare-dot-ipv4-2"
+transport = "tls"
+endpoint = "1.0.0.1:853"
+server_name = "one.one.one.one"
+timeout_ms = 3000
+
+[[upstreams.default]]
+name = "cloudflare-dot-ipv6-1"
+transport = "tls"
+endpoint = "[2606:4700:4700::1111]:853"
+server_name = "one.one.one.one"
+timeout_ms = 3000
+
+[[upstreams.default]]
+name = "cloudflare-dot-ipv6-2"
+transport = "tls"
+endpoint = "[2606:4700:4700::1001]:853"
+server_name = "one.one.one.one"
+timeout_ms = 3000
+
+# --- Cloudflare DoH (DNS over HTTPS) ---
+
+[[upstreams.default]]
+name = "cloudflare-doh-1"
+transport = "https"
+endpoint = "https://cloudflare-dns.com/dns-query"
+server_name = "cloudflare-dns.com"
+timeout_ms = 3000
+
+[[upstreams.default]]
+name = "cloudflare-doh-2"
+transport = "https"
+endpoint = "https://1.1.1.1/dns-query"
+server_name = "one.one.one.one"
+timeout_ms = 3000
+
+# ─── Cache ───────────────────────────────────────────────────────
+
+[cache]
+max_entries = 4096
+min_ttl_secs = 5
+max_ttl_secs = 86400
+negative_ttl_secs = 30
+
+# ─── Resolver ────────────────────────────────────────────────────
+
+[resolver]
+location = "unknown"

@@ -4,6 +4,7 @@ resolver = "2"
 members = [
     "crates/dns-types",
     "crates/dns-protocol",
+    "crates/dns-transport",
     "crates/border-dns-config",
     "crates/border-dns-cache",
     "crates/border-dns-upstream",
@@ -12,7 +13,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 rust-version = "1.88"
 license = "Apache-2.0"
@@ -23,29 +24,22 @@ keywords = ["dns", "resolver", "geoip", "routing", "observability"]
 categories = ["network-programming"]
 
 [workspace.dependencies]
-# ─────────────────────────────────────────────────────────────
 # Internal crates
-# ─────────────────────────────────────────────────────────────
-
 dns-types = { path = "crates/dns-types" }
 dns-protocol = { path = "crates/dns-protocol" }
+dns-transport = { path = "crates/dns-transport" }
 border-dns-config = { path = "crates/border-dns-config" }
 border-dns-cache = { path = "crates/border-dns-cache" }
 border-dns-upstream = { path = "crates/border-dns-upstream" }
 border-dns-runtime = { path = "crates/border-dns-runtime" }
 
-# ─────────────────────────────────────────────────────────────
 # Core dependencies
-# ─────────────────────────────────────────────────────────────
-
 bytes = "1"
 thiserror = "2"
 anyhow = "1"
+futures = "0.3"
 
-# ─────────────────────────────────────────────────────────────
 # Async runtime / networking
-# ─────────────────────────────────────────────────────────────
-
 tokio = { version = "1", features = [
     "rt-multi-thread",
     "macros",
@@ -55,41 +49,38 @@ tokio = { version = "1", features = [
     "sync",
     "io-util",
 ] }
+tokio-util = { version = "0.7", features = ["codec", "time"] }
 
-# ─────────────────────────────────────────────────────────────
-# Config / serialization
-# ─────────────────────────────────────────────────────────────
+# TLS (DoT / DoH / DoQ)
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "logging", "tls12"] }
+rustls-pemfile = "2"
+webpki-roots = "1"
 
+# HTTP (DoH / DoJ server + DoH upstream client)
+axum = "0.8"
+reqwest = { version = "0.13", default-features = false, features = ["http2"] }
+axum-server = { version = "0.8", features = ["tls-rustls"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "cors", "timeout"] }
+http = "1"
+base64 = "0.22"
+urlencoding = "2"
+
+# Config / serialization / CLI / Logging / tracing
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 toml = "1"
-
-# ─────────────────────────────────────────────────────────────
-# CLI
-# ─────────────────────────────────────────────────────────────
 
 clap = { version = "4", features = ["derive"] }
 
-# ─────────────────────────────────────────────────────────────
-# Logging / tracing
-# ─────────────────────────────────────────────────────────────
-
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = [
-    "env-filter",
-    "fmt",
-    "time",
-] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "time"] }
 
-# ─────────────────────────────────────────────────────────────
 # Concurrent state
-# ─────────────────────────────────────────────────────────────
-
 dashmap = "6"
 
-# ─────────────────────────────────────────────────────────────
 # Testing
-# ─────────────────────────────────────────────────────────────
-
 pretty_assertions = "1"
 hex = "0.4"
 

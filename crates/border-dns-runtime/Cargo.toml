@@ -5,15 +5,26 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Production DNS runtime: UDP/TCP servers, bootstrap, graceful shutdown."
+description = "Production DNS runtime: UDP/TCP/DoT/DoH/DoQ/DoJ servers, bootstrap, graceful shutdown."
 
 [dependencies]
 dns-types.workspace = true
 dns-protocol.workspace = true
+dns-transport.workspace = true
 border-dns-config.workspace = true
 border-dns-cache.workspace = true
 border-dns-upstream.workspace = true
 tokio.workspace = true
+tokio-rustls.workspace = true
+rustls.workspace = true
+rustls-pemfile.workspace = true
+webpki-roots.workspace = true
+axum.workspace = true
+axum-server.workspace = true
+tower-http.workspace = true
+http.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 anyhow.workspace = true

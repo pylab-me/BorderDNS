@@ -1,14 +1,16 @@
 //! BorderDNS production DNS runtime.
 //!
-//! Owns the UDP/TCP DNS servers, bootstrap, and graceful shutdown.
+//! Owns the UDP/TCP/DoT/DoH/DoJ DNS servers, bootstrap, and graceful shutdown.
 //! No reusable business logic should live here.
 
+pub mod handler;
 pub mod server;
 
 use std::sync::Arc;
 
 use border_dns_cache::DnsCache;
 use border_dns_config::Config;
+use dns_transport::MetricsRegistry;
 use tokio::sync::Notify;
 use tracing::info;
 
@@ -19,6 +21,8 @@ pub struct RuntimeContext {
     pub config: Config,
     /// DNS response cache.
     pub cache: Arc<DnsCache>,
+    /// Per-transport metrics.
+    pub metrics: Arc<MetricsRegistry>,
     /// Shutdown signal.
     pub shutdown: Arc<Notify>,
 }
@@ -31,6 +35,7 @@ impl RuntimeContext {
         Self {
             config,
             cache,
+            metrics: Arc::new(MetricsRegistry::default()),
             shutdown: Arc::new(Notify::new()),
         }
     }
@@ -43,7 +48,7 @@ impl RuntimeContext {
 /// Returns error if the tracing subscriber fails to initialize.
 pub fn init_tracing(verbose: bool) -> anyhow::Result<()> {
     let filter = if verbose {
-        "border_dns_runtime=debug,border_dns_upstream=debug,border_dns_cache=debug,border_dns=debug"
+        "border_dns_runtime=debug,border_dns_upstream=debug,border_dns_cache=debug,border_dns=debug,dns_transport=debug"
     } else {
         "info"
     };
@@ -62,7 +67,7 @@ pub fn init_tracing(verbose: bool) -> anyhow::Result<()> {
 
 /// Run the BorderDNS runtime.
 ///
-/// Starts UDP and TCP servers on configured addresses, waits for shutdown signal.
+/// Starts all enabled listeners (UDP, TCP, DoT, DoH, DoJ) and waits for shutdown signal.
 ///
 /// # Errors
 ///
@@ -73,31 +78,72 @@ pub async fn run(config: Config, verbose: bool) -> anyhow::Result<()> {
     let ctx = Arc::new(RuntimeContext::new(config));
 
     info!("BorderDNS runtime starting");
+
+    let mut handles = Vec::new();
+
+    // Start UDP listener.
+    if let Some(ref udp) = ctx.config.listeners.udp {
+        if udp.enabled {
+            let addr = udp.listen.clone();
+            let ctx = Arc::clone(&ctx);
+            info!(address = %addr, "UDP server starting");
+            handles.push(tokio::spawn(
+                async move { server::run_udp(addr, ctx).await },
+            ));
+        }
+    }
+
+    // Start TCP listener.
+    if let Some(ref tcp) = ctx.config.listeners.tcp {
+        if tcp.enabled {
+            let addr = tcp.listen.clone();
+            let ctx = Arc::clone(&ctx);
+            info!(address = %addr, "TCP server starting");
+            handles.push(tokio::spawn(
+                async move { server::run_tcp(addr, ctx).await },
+            ));
+        }
+    }
+
+    // Start DoT listener.
+    if let Some(ref dot) = ctx.config.listeners.dot {
+        if dot.enabled {
+            let cfg = dot.clone();
+            let ctx = Arc::clone(&ctx);
+            info!(address = %cfg.listen, "DoT server starting");
+            handles.push(tokio::spawn(async move { server::run_dot(cfg, ctx).await }));
+        }
+    }
+
+    // Start DoH listener.
+    if let Some(ref doh) = ctx.config.listeners.doh {
+        if doh.enabled {
+            let cfg = doh.clone();
+            let ctx = Arc::clone(&ctx);
+            info!(address = %cfg.listen, "DoH server starting");
+            handles.push(tokio::spawn(async move { server::run_doh(cfg, ctx).await }));
+        }
+    }
+
+    // Start DoJ listener.
+    if let Some(ref doj) = ctx.config.listeners.doj {
+        if doj.enabled {
+            let cfg = doj.clone();
+            let ctx = Arc::clone(&ctx);
+            info!(address = %cfg.listen, "DoJ server starting");
+            handles.push(tokio::spawn(async move { server::run_doj(cfg, ctx).await }));
+        }
+    }
+
+    if handles.is_empty() {
+        anyhow::bail!("no listeners enabled in configuration");
+    }
+
     info!(
-        listeners = ?ctx.config.server.listen,
         upstreams = ?ctx.config.upstreams.default.len(),
         cache_max = ctx.config.cache.max_entries,
         "configuration loaded"
     );
-
-    let mut handles = Vec::new();
-
-    // Start listener tasks.
-    for listener_str in &ctx.config.server.listen {
-        let addr: border_dns_config::ListenerAddr = listener_str
-            .parse()
-            .map_err(|e: String| anyhow::anyhow!(e))?;
-        let ctx = Arc::clone(&ctx);
-        let handle = match addr.protocol {
-            border_dns_config::DnsProtocol::Udp => {
-                tokio::spawn(async move { server::run_udp(addr.addr, ctx).await })
-            }
-            border_dns_config::DnsProtocol::Tcp => {
-                tokio::spawn(async move { server::run_tcp(addr.addr, ctx).await })
-            }
-        };
-        handles.push(handle);
-    }
 
     // Wait for Ctrl+C.
     let shutdown_ctx = Arc::clone(&ctx);

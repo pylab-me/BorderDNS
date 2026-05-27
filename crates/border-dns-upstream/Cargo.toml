@@ -5,16 +5,23 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Upstream DNS resolver with UDP/TCP transport and failover for BorderDNS runtime."
+description = "Upstream DNS resolver with UDP/TCP/DoT/DoH transport and failover for BorderDNS runtime."
 
 [dependencies]
 dns-types.workspace = true
 dns-protocol.workspace = true
+dns-transport.workspace = true
 border-dns-config.workspace = true
 tokio.workspace = true
+tokio-rustls.workspace = true
+rustls.workspace = true
+webpki-roots.workspace = true
+reqwest.workspace = true
 bytes.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
+anyhow.workspace = true
+tower-http.workspace = true
 
 [lints]
 workspace = true
