@@ -1,6 +1,6 @@
 //! In-memory governance store for per-domain governance state.
 //!
-//! `GovernanceStore` is a concurrent map of domain → `DomainGovernanceState`.
+//! `GovernanceStateStore` is a concurrent map of domain → `DomainGovernanceState`.
 //! It supports read/update from the pipeline hot path and background workers.
 //!
 //! The store is intentionally simple: an in-memory `DashMap` with no persistence.
@@ -17,11 +17,11 @@ use crate::DomainGovernanceState;
 /// Key: domain name (FQDN, e.g. "example.com.")
 /// Value: `DomainGovernanceState`
 #[derive(Debug)]
-pub struct GovernanceStore {
+pub struct GovernanceStateStore {
     inner: dashmap::DashMap<String, Arc<DomainGovernanceState>>,
 }
 
-impl GovernanceStore {
+impl GovernanceStateStore {
     /// Create an empty governance store.
     #[must_use]
     pub fn new() -> Self {
@@ -97,7 +97,7 @@ impl GovernanceStore {
     }
 }
 
-impl Default for GovernanceStore {
+impl Default for GovernanceStateStore {
     fn default() -> Self {
         Self::new()
     }

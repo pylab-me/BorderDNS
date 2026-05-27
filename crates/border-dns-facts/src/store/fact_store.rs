@@ -15,13 +15,13 @@ use std::sync::Mutex;
 use chrono::DateTime;
 use chrono::Utc;
 
-use crate::FactEmit;
+use crate::FactEmitter;
 use crate::FactStoreManifest;
 use crate::RetentionConfig;
 
 // ─── Fact Store Writer ───────────────────────────────────────────
 
-/// Writes `FactEmit` events to hourly JSONL files under a base directory.
+/// Writes `FactEmitter` events to hourly JSONL files under a base directory.
 ///
 /// File layout:
 /// ```text
@@ -32,15 +32,15 @@ use crate::RetentionConfig;
 /// ```
 ///
 /// Thread-safe: internal state is protected by a `Mutex`.
-pub struct FactStoreWriter {
+pub struct FactEventWriter {
     base_dir: PathBuf,
     inner: Mutex<WriterState>,
     retention: RetentionConfig,
 }
 
-impl std::fmt::Debug for FactStoreWriter {
+impl std::fmt::Debug for FactEventWriter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("FactStoreWriter")
+        f.debug_struct("FactEventWriter")
             .field("base_dir", &self.base_dir)
             .finish_non_exhaustive()
     }
@@ -57,7 +57,7 @@ struct WriterState {
     total_events: u64,
 }
 
-impl FactStoreWriter {
+impl FactEventWriter {
     /// Create a new fact store writer.
     ///
     /// Creates the base directory if it doesn't exist. If an existing
@@ -155,7 +155,7 @@ impl FactStoreWriter {
         Ok(sw)
     }
 
-    /// Write a single `FactEmit` event to the active JSONL file.
+    /// Write a single `FactEmitter` event to the active JSONL file.
     ///
     /// If the hour has changed since the last write, the current file is
     /// sealed and a new hourly file is opened.
@@ -163,7 +163,7 @@ impl FactStoreWriter {
     /// # Errors
     ///
     /// Returns `std::io::Error` on write failure.
-    pub fn write_event(&self, event: &FactEmit) -> std::io::Result<()> {
+    pub fn write_event(&self, event: &FactEmitter) -> std::io::Result<()> {
         let now = Utc::now();
         let hour_tag = format_hour_tag(now);
 

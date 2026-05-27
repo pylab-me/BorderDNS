@@ -13,7 +13,7 @@ listen = "0.0.0.0:5353"
 name = "alidns"
 endpoint = "223.5.5.5:53"
 "#;
-    let config: Config = toml::from_str(toml_str).unwrap();
+    let config: RuntimeConfig = toml::from_str(toml_str).unwrap();
     assert!(config.validate().is_ok());
 }
 
@@ -29,7 +29,7 @@ enabled = false
 name = "alidns"
 endpoint = "223.5.5.5:53"
 "#;
-    let config: Config = toml::from_str(toml_str).unwrap();
+    let config: RuntimeConfig = toml::from_str(toml_str).unwrap();
     assert!(config.validate().is_err());
 }
 
@@ -52,7 +52,7 @@ key_file = "./certs/server.key"
 name = "alidns"
 endpoint = "223.5.5.5:53"
 "#;
-    let config: Config = toml::from_str(toml_str).unwrap();
+    let config: RuntimeConfig = toml::from_str(toml_str).unwrap();
     assert!(config.validate().is_ok());
     let dot = config.listeners.dot.unwrap();
     assert!(dot.enabled);
@@ -79,7 +79,7 @@ key_file = "./certs/server.key"
 name = "alidns"
 endpoint = "223.5.5.5:53"
 "#;
-    let config: Config = toml::from_str(toml_str).unwrap();
+    let config: RuntimeConfig = toml::from_str(toml_str).unwrap();
     assert!(config.validate().is_ok());
     let doh = config.listeners.doh.unwrap();
     assert_eq!(doh.path, "/dns-query");
@@ -106,7 +106,7 @@ key_file = "./certs/server.key"
 name = "alidns"
 endpoint = "223.5.5.5:53"
 "#;
-    let config: Config = toml::from_str(toml_str).unwrap();
+    let config: RuntimeConfig = toml::from_str(toml_str).unwrap();
     assert!(config.validate().is_ok());
     let doq = config.listeners.doq.unwrap();
     assert_eq!(doq.alpn, vec!["doq".to_string()]);
@@ -132,7 +132,7 @@ transport = "tls"
 endpoint = "1.1.1.1:853"
 server_name = "cloudflare-dns.com"
 "#;
-    let config: Config = toml::from_str(toml_str).unwrap();
+    let config: RuntimeConfig = toml::from_str(toml_str).unwrap();
     assert!(config.validate().is_ok());
     assert_eq!(config.upstreams.default.len(), 2);
     assert_eq!(config.upstreams.default[0].transport, DnsProtocol::Https);
@@ -157,7 +157,7 @@ name = "broken-dot"
 transport = "tls"
 endpoint = "1.1.1.1:853"
 "#;
-    let config: Config = toml::from_str(toml_str).unwrap();
+    let config: RuntimeConfig = toml::from_str(toml_str).unwrap();
     assert!(config.validate().is_err());
 }
 
@@ -175,7 +175,7 @@ name = "broken-doh"
 transport = "https"
 endpoint = "not-a-url"
 "#;
-    let config: Config = toml::from_str(toml_str).unwrap();
+    let config: RuntimeConfig = toml::from_str(toml_str).unwrap();
     assert!(config.validate().is_err());
 }
 
@@ -191,7 +191,7 @@ listen = "0.0.0.0:5353"
 [upstreams]
 default = []
 "#;
-    let config: Config = toml::from_str(toml_str).unwrap();
+    let config: RuntimeConfig = toml::from_str(toml_str).unwrap();
     assert!(config.validate().is_err());
 }
 
@@ -208,7 +208,7 @@ listen = "0.0.0.0:5353"
 name = "alidns"
 endpoint = "223.5.5.5:53"
 "#;
-    let config: Config = toml::from_str(toml_str).unwrap();
+    let config: RuntimeConfig = toml::from_str(toml_str).unwrap();
     assert!(config.validate().is_ok());
     assert!(config.upstreams.is_route_aware());
     assert_eq!(config.upstreams.bootstrap.len(), 1);
@@ -228,7 +228,7 @@ listen = "0.0.0.0:5353"
 name = "alidns"
 endpoint = "223.5.5.5:53"
 "#;
-    let config: Config = toml::from_str(toml_str).unwrap();
+    let config: RuntimeConfig = toml::from_str(toml_str).unwrap();
     assert!(config.validate().is_ok());
     assert!(!config.upstreams.is_route_aware());
     assert_eq!(config.upstreams.default_upstreams().len(), 1);
@@ -255,7 +255,7 @@ endpoint = "223.5.5.5:53"
 name = "cloudflare"
 endpoint = "1.1.1.1:53"
 "#;
-    let config: Config = toml::from_str(toml_str).unwrap();
+    let config: RuntimeConfig = toml::from_str(toml_str).unwrap();
     assert!(config.validate().is_ok());
     assert!(config.upstreams.is_route_aware());
 }
@@ -273,7 +273,7 @@ listen = "0.0.0.0:5353"
 name = "alidns"
 endpoint = "223.5.5.5:53"
 "#;
-    let config: Config = toml::from_str(toml_str).unwrap();
+    let config: RuntimeConfig = toml::from_str(toml_str).unwrap();
     assert!(config.validate().is_err());
 }
 
@@ -295,7 +295,7 @@ fn test_listener_addr_parse() {
 
 #[test]
 fn test_config_serialize_roundtrip() {
-    let config = Config {
+    let config = RuntimeConfig {
         server: ServerConfig {
             default_timeout_ms: 5000,
             graceful_shutdown_ms: 10_000,
@@ -329,7 +329,7 @@ fn test_config_serialize_roundtrip() {
     };
 
     let toml_str = toml::to_string(&config).unwrap();
-    let parsed: Config = toml::from_str(&toml_str).unwrap();
+    let parsed: RuntimeConfig = toml::from_str(&toml_str).unwrap();
     assert_eq!(parsed.server.default_timeout_ms, 5000);
     assert_eq!(parsed.upstreams.default.len(), 1);
 }
@@ -347,7 +347,7 @@ listen = "0.0.0.0:5353"
 name = "test"
 endpoint = "223.5.5.5:53"
 "#;
-    let config: Config = toml::from_str(toml_str).unwrap();
+    let config: RuntimeConfig = toml::from_str(toml_str).unwrap();
     assert_eq!(config.server.default_timeout_ms, 3000);
     assert_eq!(config.server.graceful_shutdown_ms, 5000);
     assert_eq!(config.cache.max_entries, 4096);
@@ -376,6 +376,6 @@ key_file = "./certs/server.key"
 name = "test"
 endpoint = "223.5.5.5:53"
 "#;
-    let config: Config = toml::from_str(toml_str).unwrap();
+    let config: RuntimeConfig = toml::from_str(toml_str).unwrap();
     assert!(config.validate().is_err());
 }

@@ -19,7 +19,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.88"
 license = "Apache-2.0"
@@ -74,7 +74,7 @@ webpki-roots = "1"
 axum = "0.8"
 axum-server = { version = "0.8", features = ["tls-rustls"] }
 tower-http = { version = "0.6", features = ["trace", "cors", "timeout"] }
-hyper = { version = "1", features = ["client", "http2"] }
+hyper = { version = "1.9", features = ["client", "http2"] }
 hyper-util = { version = "0.1", features = ["client", "client-legacy", "tokio", "http2"] }
 hyper-rustls = { version = "0.27", default-features = false, features = ["http2", "ring", "webpki-tokio"] }
 http-body-util = "0.1"

@@ -3,8 +3,8 @@ use chrono::Utc;
 use super::*;
 use crate::GovernancePhase;
 
-fn make_store() -> GovernanceStore {
-    GovernanceStore::new()
+fn make_store() -> GovernanceStateStore {
+    GovernanceStateStore::new()
 }
 
 #[test]
@@ -98,6 +98,6 @@ fn test_domains_list() {
 
 #[test]
 fn test_default_trait() {
-    let store = GovernanceStore::default();
+    let store = GovernanceStateStore::default();
     assert!(store.is_empty());
 }

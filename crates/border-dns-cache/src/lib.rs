@@ -157,20 +157,20 @@ impl CacheMetrics {
     }
 }
 
-// ─── DnsCache ────────────────────────────────────────────────────
+// ─── RouteScopedCache ─────────────────────────────────────────────
 
 /// DNS response cache.
 ///
 /// Thread-safe via `DashMap`. Supports TTL-based expiration.
 /// Returns `CachedResponse` to avoid clone on cache hit.
 #[derive(Debug)]
-pub struct DnsCache {
+pub struct RouteScopedCache {
     entries: DashMap<CacheKey, CacheEntry>,
     stats: CacheMetrics,
     config: CacheConfig,
 }
 
-impl DnsCache {
+impl RouteScopedCache {
     /// Create a new cache with the given configuration.
     #[must_use]
     pub fn new(config: CacheConfig) -> Self {

@@ -17,22 +17,22 @@ use dns_types::Route;
 use domain_knowledge::BlockMatcher;
 use domain_knowledge::BuiltInDomainKnowledge;
 use domain_knowledge::HostsTable;
-use facts::FactEmit;
+use facts::FactEmitter;
 use facts::GovernancePhase;
-use facts::GovernanceStore;
+use facts::GovernanceStateStore;
 use facts::GovernanceThresholds;
 use facts::MeaningfulEventKind;
-use facts::ObservationJob;
-use facts::ObservationJobKind;
+use facts::ObservationTask;
+use facts::ObservationTaskKind;
 use geoip::SimpleGeoIp;
-use route_cache::DnsCache;
+use route_cache::RouteScopedCache;
 use route_policy::RouteDecision;
 use route_policy::RoutePolicy;
 use route_policy::governance_transition::GovernanceTransitionInput;
 use route_policy::governance_transition::evaluate_governance_transition;
 use route_policy::scoring::RouteEvidenceInput;
 use route_policy::scoring::score_route_evidence;
-use runtime_config::Config;
+use runtime_config::RuntimeConfig;
 
 // ─── Query Context ───────────────────────────────────────────────
 
@@ -62,34 +62,34 @@ pub struct QueryContext {
 /// Orchestrates: hosts override → block → route determination → cache lookup → upstream resolve → answer selection.
 #[derive(Debug)]
 pub struct Pipeline {
-    config: Arc<Config>,
-    cache: Arc<DnsCache>,
+    config: Arc<RuntimeConfig>,
+    cache: Arc<RouteScopedCache>,
     domain_knowledge: Arc<BuiltInDomainKnowledge>,
     geoip: Arc<SimpleGeoIp>,
     route_policy: Arc<RoutePolicy>,
-    governance_store: Arc<GovernanceStore>,
+    governance_store: Arc<GovernanceStateStore>,
     governance_thresholds: Arc<GovernanceThresholds>,
     /// Hosts override table (static domain → IP).
     hosts: Arc<HostsTable>,
     /// Domain block matcher.
     block_matcher: Arc<BlockMatcher>,
     /// Channel sender for fact emissions (non-blocking).
-    fact_tx: tokio::sync::mpsc::UnboundedSender<FactEmit>,
-    /// Channel sender for observation jobs (non-blocking).
-    observation_tx: tokio::sync::mpsc::UnboundedSender<ObservationJob>,
+    fact_tx: tokio::sync::mpsc::UnboundedSender<FactEmitter>,
+    /// Channel sender for observation tasks (non-blocking).
+    observation_tx: tokio::sync::mpsc::UnboundedSender<ObservationTask>,
 }
 
 impl Pipeline {
     /// Create a new pipeline from configuration and shared state.
     #[must_use]
     pub fn new(
-        config: Arc<Config>,
-        cache: Arc<DnsCache>,
+        config: Arc<RuntimeConfig>,
+        cache: Arc<RouteScopedCache>,
         domain_knowledge: Arc<BuiltInDomainKnowledge>,
         geoip: Arc<SimpleGeoIp>,
     ) -> Self {
         let route_policy = Arc::new(RoutePolicy::new(config.resolver.location));
-        let governance_store = Arc::new(GovernanceStore::new());
+        let governance_store = Arc::new(GovernanceStateStore::new());
         let mut governance_thresholds = GovernanceThresholds::default();
         governance_thresholds.third_party_mode = if config.third_party.enabled {
             facts::ThirdPartyMode::Enabled
@@ -123,14 +123,14 @@ impl Pipeline {
     /// The receivers should be consumed by background workers.
     #[must_use]
     pub fn with_governance_channels(
-        config: Arc<Config>,
-        cache: Arc<DnsCache>,
+        config: Arc<RuntimeConfig>,
+        cache: Arc<RouteScopedCache>,
         domain_knowledge: Arc<BuiltInDomainKnowledge>,
         geoip: Arc<SimpleGeoIp>,
-        governance_store: Arc<GovernanceStore>,
+        governance_store: Arc<GovernanceStateStore>,
         governance_thresholds: Arc<GovernanceThresholds>,
-        fact_tx: tokio::sync::mpsc::UnboundedSender<FactEmit>,
-        observation_tx: tokio::sync::mpsc::UnboundedSender<ObservationJob>,
+        fact_tx: tokio::sync::mpsc::UnboundedSender<FactEmitter>,
+        observation_tx: tokio::sync::mpsc::UnboundedSender<ObservationTask>,
     ) -> Self {
         let route_policy = Arc::new(RoutePolicy::new(config.resolver.location));
         let hosts = Arc::new(Self::build_hosts_from_config(&config.hosts));
@@ -153,7 +153,7 @@ impl Pipeline {
 
     /// Access the governance store (for inspection / admin).
     #[must_use]
-    pub fn governance_store(&self) -> &Arc<GovernanceStore> {
+    pub fn governance_store(&self) -> &Arc<GovernanceStateStore> {
         &self.governance_store
     }
 
@@ -351,7 +351,7 @@ impl Pipeline {
                     } else {
                         MeaningfulEventKind::PhaseChanged
                     };
-                    let mut fact = FactEmit::new(
+                    let mut fact = FactEmitter::new(
                         domain_str.clone(),
                         event_kind,
                         transition.reason_code.to_string(),
@@ -361,7 +361,7 @@ impl Pipeline {
                     let _ = self.fact_tx.send(fact);
                 }
 
-                // Enqueue observation job if we have IPs to analyze
+                // Enqueue observation task if we have IPs to analyze
                 if evidence.cn_count + evidence.foreign_count > 0 {
                     let ip_addrs: Vec<String> = upstream_resp
                         .message
@@ -378,10 +378,10 @@ impl Pipeline {
                         .collect();
 
                     if !ip_addrs.is_empty() {
-                        let job = ObservationJob {
+                        let task = ObservationTask {
                             job_id: format!("geo-{}-{}", domain_str, id),
                             domain: domain_str.clone(),
-                            job_kind: ObservationJobKind::GeoAnalysis {
+                            task_kind: ObservationTaskKind::GeoAnalysis {
                                 ip_addresses: ip_addrs,
                                 cname_chain: Vec::new(),
                             },
@@ -389,7 +389,7 @@ impl Pipeline {
                             current_route: prior_route_str.to_string(),
                             enqueued_at: chrono::Utc::now(),
                         };
-                        let _ = self.observation_tx.send(job);
+                        let _ = self.observation_tx.send(task);
                     }
                 }
 
@@ -455,10 +455,10 @@ impl Pipeline {
                 let elapsed = total_start.elapsed();
 
                 // Enqueue failure observation job
-                let job = ObservationJob {
+                let task = ObservationTask {
                     job_id: format!("fail-{}-{}", domain_str, id),
                     domain: domain_str.clone(),
-                    job_kind: ObservationJobKind::GeoAnalysis {
+                    task_kind: ObservationTaskKind::GeoAnalysis {
                         ip_addresses: Vec::new(),
                         cname_chain: Vec::new(),
                     },
@@ -466,7 +466,7 @@ impl Pipeline {
                     current_route: prior_route_str.to_string(),
                     enqueued_at: chrono::Utc::now(),
                 };
-                let _ = self.observation_tx.send(job);
+                let _ = self.observation_tx.send(task);
 
                 tracing::error!(
                     transport = %meta.transport,

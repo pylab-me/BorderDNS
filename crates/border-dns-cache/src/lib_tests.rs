@@ -30,7 +30,7 @@ fn make_test_response(name: &str, ip: Ipv4Addr, ttl: u32) -> DnsMessage {
 #[test]
 fn test_cache_hit_and_miss() {
     let config = CacheConfig::default();
-    let cache = DnsCache::new(config);
+    let cache = RouteScopedCache::new(config);
     let name = DomainName::from_str("example.com").unwrap();
     let qtype = QType::Type(RecordType::A);
 
@@ -55,7 +55,7 @@ fn test_ttl_clamping() {
         max_ttl_secs: 3600,
         ..CacheConfig::default()
     };
-    let cache = DnsCache::new(config);
+    let cache = RouteScopedCache::new(config);
     let name = DomainName::from_str("example.com").unwrap();
     let qtype = QType::Type(RecordType::A);
 
@@ -73,7 +73,7 @@ fn test_negative_cache() {
         negative_ttl_secs: 5,
         ..CacheConfig::default()
     };
-    let cache = DnsCache::new(config);
+    let cache = RouteScopedCache::new(config);
     let name = DomainName::from_str("nonexistent.example.com").unwrap();
     let qtype = QType::Type(RecordType::A);
 
@@ -87,7 +87,7 @@ fn test_negative_cache() {
 #[test]
 fn test_clear() {
     let config = CacheConfig::default();
-    let cache = DnsCache::new(config);
+    let cache = RouteScopedCache::new(config);
     let name = DomainName::from_str("example.com").unwrap();
     let qtype = QType::Type(RecordType::A);
 
@@ -102,7 +102,7 @@ fn test_clear() {
 #[test]
 fn test_cache_returns_arc_no_deep_clone() {
     let config = CacheConfig::default();
-    let cache = DnsCache::new(config);
+    let cache = RouteScopedCache::new(config);
     let name = DomainName::from_str("example.com").unwrap();
     let qtype = QType::Type(RecordType::A);
 

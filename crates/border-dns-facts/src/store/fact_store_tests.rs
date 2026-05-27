@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use chrono::Utc;
 
 use super::*;
-use crate::FactEmit;
+use crate::FactEmitter;
 use crate::MeaningfulEventKind;
 
 fn temp_dir() -> PathBuf {
@@ -46,7 +46,7 @@ fn test_extract_hour_tag() {
 #[test]
 fn test_writer_creates_directory_and_file() {
     let dir = temp_dir();
-    let writer = FactStoreWriter::new(dir.clone()).unwrap();
+    let writer = FactEventWriter::new(dir.clone()).unwrap();
 
     assert!(dir.join("derived-manifest.json").exists());
     assert!(dir.join(writer.manifest().active_event_file).exists());
@@ -58,9 +58,9 @@ fn test_writer_creates_directory_and_file() {
 #[test]
 fn test_writer_write_event() {
     let dir = temp_dir();
-    let writer = FactStoreWriter::new(dir.clone()).unwrap();
+    let writer = FactEventWriter::new(dir.clone()).unwrap();
 
-    let event = FactEmit::new(
+    let event = FactEmitter::new(
         "example.com".into(),
         MeaningfulEventKind::FirstSeenDomain,
         "new_domain".into(),
@@ -70,7 +70,7 @@ fn test_writer_write_event() {
     assert_eq!(writer.total_events(), 1);
 
     // Write another.
-    let event2 = FactEmit::new(
+    let event2 = FactEmitter::new(
         "test.com".into(),
         MeaningfulEventKind::PhaseChanged,
         "learning_to_suggested".into(),
@@ -85,7 +85,7 @@ fn test_writer_write_event() {
     assert_eq!(lines.len(), 2);
 
     // Parse first line.
-    let parsed: FactEmit = serde_json::from_str(lines[0]).unwrap();
+    let parsed: FactEmitter = serde_json::from_str(lines[0]).unwrap();
     assert_eq!(parsed.domain, "example.com");
 
     // Cleanup
@@ -95,9 +95,9 @@ fn test_writer_write_event() {
 #[test]
 fn test_writer_manifest_roundtrip() {
     let dir = temp_dir();
-    let writer = FactStoreWriter::new(dir.clone()).unwrap();
+    let writer = FactEventWriter::new(dir.clone()).unwrap();
 
-    let event = FactEmit::new(
+    let event = FactEmitter::new(
         "example.com".into(),
         MeaningfulEventKind::FirstSeenDomain,
         "test".into(),
@@ -121,9 +121,9 @@ fn test_writer_reload_preserves_events() {
 
     // Write some events.
     {
-        let writer = FactStoreWriter::new(dir.clone()).unwrap();
+        let writer = FactEventWriter::new(dir.clone()).unwrap();
         for i in 0..5 {
-            let event = FactEmit::new(
+            let event = FactEmitter::new(
                 format!("domain{i}.com"),
                 MeaningfulEventKind::FirstSeenDomain,
                 "test".into(),
@@ -134,7 +134,7 @@ fn test_writer_reload_preserves_events() {
 
     // Reload from disk.
     {
-        let writer = FactStoreWriter::new(dir.clone()).unwrap();
+        let writer = FactEventWriter::new(dir.clone()).unwrap();
         // New writer should see the existing manifest.
         let manifest = writer.manifest();
         assert_eq!(manifest.schema_version, "borderdns.fact.v1");

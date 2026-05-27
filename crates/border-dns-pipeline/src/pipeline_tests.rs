@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use domain_knowledge::BuiltInDomainKnowledge;
 use geoip::SimpleGeoIp;
-use route_cache::DnsCache;
-use runtime_config::Config;
+use route_cache::RouteScopedCache;
+use runtime_config::RuntimeConfig;
 
 use super::Pipeline;
 
-fn test_config() -> Config {
+fn test_config() -> RuntimeConfig {
     let toml_str = r#"
 [server]
 
@@ -41,7 +41,7 @@ fn test_meta() -> dns_transport::RequestMeta {
 #[tokio::test]
 async fn test_pipeline_creation() {
     let config = Arc::new(test_config());
-    let cache = Arc::new(DnsCache::new(config.cache.clone()));
+    let cache = Arc::new(RouteScopedCache::new(config.cache.clone()));
     let knowledge = Arc::new(BuiltInDomainKnowledge::new());
     let geoip = Arc::new(SimpleGeoIp);
     let pipeline = Pipeline::new(config, cache, knowledge, geoip);
@@ -71,7 +71,7 @@ ttl_secs = 120
 "blocked.local" = ["1.2.3.4"]
 "#;
     let config = Arc::new(runtime_config::load_from_str(toml_str).unwrap());
-    let cache = Arc::new(DnsCache::new(config.cache.clone()));
+    let cache = Arc::new(RouteScopedCache::new(config.cache.clone()));
     let knowledge = Arc::new(BuiltInDomainKnowledge::new());
     let geoip = Arc::new(SimpleGeoIp);
     let pipeline = Pipeline::new(config, cache, knowledge, geoip);
@@ -117,7 +117,7 @@ enabled = true
 "ipv6.local" = ["2001:db8::1"]
 "#;
     let config = Arc::new(runtime_config::load_from_str(toml_str).unwrap());
-    let cache = Arc::new(DnsCache::new(config.cache.clone()));
+    let cache = Arc::new(RouteScopedCache::new(config.cache.clone()));
     let knowledge = Arc::new(BuiltInDomainKnowledge::new());
     let geoip = Arc::new(SimpleGeoIp);
     let pipeline = Pipeline::new(config, cache, knowledge, geoip);
@@ -158,7 +158,7 @@ enabled = true
 "blocked.local" = ["1.2.3.4"]
 "#;
     let config = Arc::new(runtime_config::load_from_str(toml_str).unwrap());
-    let cache = Arc::new(DnsCache::new(config.cache.clone()));
+    let cache = Arc::new(RouteScopedCache::new(config.cache.clone()));
     let knowledge = Arc::new(BuiltInDomainKnowledge::new());
     let geoip = Arc::new(SimpleGeoIp);
     let pipeline = Pipeline::new(config, cache, knowledge, geoip);
@@ -204,7 +204,7 @@ enabled = false
 "blocked.local" = ["1.2.3.4"]
 "#;
     let config = Arc::new(runtime_config::load_from_str(toml_str).unwrap());
-    let cache = Arc::new(DnsCache::new(config.cache.clone()));
+    let cache = Arc::new(RouteScopedCache::new(config.cache.clone()));
     let knowledge = Arc::new(BuiltInDomainKnowledge::new());
     let geoip = Arc::new(SimpleGeoIp);
     let pipeline = Pipeline::new(config, cache, knowledge, geoip);
@@ -252,7 +252,7 @@ domains = ["ads.example.com"]
 suffixes = []
 "#;
     let config = Arc::new(runtime_config::load_from_str(toml_str).unwrap());
-    let cache = Arc::new(DnsCache::new(config.cache.clone()));
+    let cache = Arc::new(RouteScopedCache::new(config.cache.clone()));
     let knowledge = Arc::new(BuiltInDomainKnowledge::new());
     let geoip = Arc::new(SimpleGeoIp);
     let pipeline = Pipeline::new(config, cache, knowledge, geoip);
@@ -299,7 +299,7 @@ domains = []
 suffixes = ["doubleclick.net"]
 "#;
     let config = Arc::new(runtime_config::load_from_str(toml_str).unwrap());
-    let cache = Arc::new(DnsCache::new(config.cache.clone()));
+    let cache = Arc::new(RouteScopedCache::new(config.cache.clone()));
     let knowledge = Arc::new(BuiltInDomainKnowledge::new());
     let geoip = Arc::new(SimpleGeoIp);
     let pipeline = Pipeline::new(config, cache, knowledge, geoip);
@@ -340,7 +340,7 @@ blackhole_ipv6 = "fc00::1"
 domains = ["tracker.evil.com"]
 "#;
     let config = Arc::new(runtime_config::load_from_str(toml_str).unwrap());
-    let cache = Arc::new(DnsCache::new(config.cache.clone()));
+    let cache = Arc::new(RouteScopedCache::new(config.cache.clone()));
     let knowledge = Arc::new(BuiltInDomainKnowledge::new());
     let geoip = Arc::new(SimpleGeoIp);
     let pipeline = Pipeline::new(config, cache, knowledge, geoip);
@@ -379,7 +379,7 @@ enabled = true
 domains = ["ads.example.com"]
 "#;
     let config = Arc::new(runtime_config::load_from_str(toml_str).unwrap());
-    let cache = Arc::new(DnsCache::new(config.cache.clone()));
+    let cache = Arc::new(RouteScopedCache::new(config.cache.clone()));
     let knowledge = Arc::new(BuiltInDomainKnowledge::new());
     let geoip = Arc::new(SimpleGeoIp);
     let pipeline = Pipeline::new(config, cache, knowledge, geoip);
@@ -419,7 +419,7 @@ enabled = false
 domains = ["ads.example.com"]
 "#;
     let config = Arc::new(runtime_config::load_from_str(toml_str).unwrap());
-    let cache = Arc::new(DnsCache::new(config.cache.clone()));
+    let cache = Arc::new(RouteScopedCache::new(config.cache.clone()));
     let knowledge = Arc::new(BuiltInDomainKnowledge::new());
     let geoip = Arc::new(SimpleGeoIp);
     let pipeline = Pipeline::new(config, cache, knowledge, geoip);
@@ -469,7 +469,7 @@ enabled = true
 domains = ["example.local"]
 "#;
     let config = Arc::new(runtime_config::load_from_str(toml_str).unwrap());
-    let cache = Arc::new(DnsCache::new(config.cache.clone()));
+    let cache = Arc::new(RouteScopedCache::new(config.cache.clone()));
     let knowledge = Arc::new(BuiltInDomainKnowledge::new());
     let geoip = Arc::new(SimpleGeoIp);
     let pipeline = Pipeline::new(config, cache, knowledge, geoip);
@@ -496,7 +496,7 @@ domains = ["example.local"]
 #[tokio::test]
 async fn test_pipeline_malformed_query_returns_formerr() {
     let config = Arc::new(test_config());
-    let cache = Arc::new(DnsCache::new(config.cache.clone()));
+    let cache = Arc::new(RouteScopedCache::new(config.cache.clone()));
     let knowledge = Arc::new(BuiltInDomainKnowledge::new());
     let geoip = Arc::new(SimpleGeoIp);
     let pipeline = Pipeline::new(config, cache, knowledge, geoip);

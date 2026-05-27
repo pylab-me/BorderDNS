@@ -16,21 +16,26 @@
 //! - Probe execution (→ border-dns-probes)
 //! - Third-party network IO
 //! - JSONL file I/O (future: border-dns-runtime background worker)
+//!
+//! ## Module Organization
+//!
+//! Types are organized into five submodules:
+//!
+//! - `schema` — Core governance enums and schema version constants
+//! - `emit` — Fact emission and observation task types
+//! - `store` — Fact persistence, governance state store, and manifest
+//! - `review` — Domain governance state and review candidate types
+//! - `thresholds` — Governance threshold configurations
 
-mod enums;
-mod fact_event;
-mod fact_store;
-mod governance_state;
-mod governance_store;
-mod observation;
-mod schema_version;
-mod store_manifest;
+pub mod emit;
+pub mod review;
+pub mod schema;
+pub mod store;
+pub mod thresholds;
 
-pub use enums::*;
-pub use fact_event::*;
-pub use fact_store::*;
-pub use governance_state::*;
-pub use governance_store::*;
-pub use observation::*;
-pub use schema_version::*;
-pub use store_manifest::*;
+// Re-export all public types at crate root for backward compatibility.
+pub use emit::*;
+pub use review::*;
+pub use schema::*;
+pub use store::*;
+pub use thresholds::*;

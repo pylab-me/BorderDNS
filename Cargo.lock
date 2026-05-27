@@ -201,7 +201,7 @@ checksum = "c4512299f36f043ab09a583e57bceb5a5aab7a73db1805848e8fef3c9e8c78b3"
 
 [[package]]
 name = "border-dns-cache"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "border-dns-config",
  "dashmap",
@@ -212,7 +212,7 @@ dependencies = [
 
 [[package]]
 name = "border-dns-cli"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "border-dns-cache",
@@ -232,7 +232,7 @@ dependencies = [
 
 [[package]]
 name = "border-dns-config"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "dns-types",
  "serde",
@@ -242,7 +242,7 @@ dependencies = [
 
 [[package]]
 name = "border-dns-domain-knowledge"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "dns-types",
  "serde",
@@ -250,7 +250,7 @@ dependencies = [
 
 [[package]]
 name = "border-dns-facts"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chrono",
  "dashmap",
@@ -261,7 +261,7 @@ dependencies = [
 
 [[package]]
 name = "border-dns-geoip"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "dns-types",
  "serde",
@@ -269,7 +269,7 @@ dependencies = [
 
 [[package]]
 name = "border-dns-pipeline"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "border-dns-cache",
  "border-dns-config",
@@ -289,7 +289,7 @@ dependencies = [
 
 [[package]]
 name = "border-dns-probes"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "border-dns-facts",
  "dns-types",
@@ -302,7 +302,7 @@ dependencies = [
 
 [[package]]
 name = "border-dns-route-policy"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "border-dns-domain-knowledge",
  "border-dns-facts",
@@ -315,7 +315,7 @@ dependencies = [
 
 [[package]]
 name = "border-dns-runtime"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -343,7 +343,7 @@ dependencies = [
 
 [[package]]
 name = "border-dns-upstream"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "border-dns-config",
  "dashmap",
@@ -784,9 +784,9 @@ checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
 name = "hyper"
-version = "1.9.0"
+version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6299f016b246a94207e63da54dbe807655bf9e00044f73ded42c3ac5305fbcca"
+checksum = "eb92f162bf56536459fc83c79b974bb12837acfed43d6bc370a7916d0ae15ecc"
 dependencies = [
  "atomic-waker",
  "bytes",

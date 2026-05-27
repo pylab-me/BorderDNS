@@ -3,7 +3,7 @@ use crate::MeaningfulEventKind;
 
 #[test]
 fn test_fact_emit_new() {
-    let emit = FactEmit::new(
+    let emit = FactEmitter::new(
         "example.com".into(),
         MeaningfulEventKind::FirstSeenDomain,
         "first_seen".into(),
@@ -17,7 +17,7 @@ fn test_fact_emit_new() {
 
 #[test]
 fn test_fact_emit_jsonl_roundtrip() {
-    let mut emit = FactEmit::new(
+    let mut emit = FactEmitter::new(
         "example.com".into(),
         MeaningfulEventKind::PhaseChanged,
         "tls_mismatch_to_review".into(),
@@ -27,7 +27,7 @@ fn test_fact_emit_jsonl_roundtrip() {
     emit.context.insert("tls_mismatch_count".into(), "3".into());
 
     let line = emit.to_jsonl_line().unwrap();
-    let parsed: FactEmit = serde_json::from_str(&line).unwrap();
+    let parsed: FactEmitter = serde_json::from_str(&line).unwrap();
     assert_eq!(parsed.domain, "example.com");
     assert_eq!(parsed.event_kind, MeaningfulEventKind::PhaseChanged);
     assert!(parsed.phase_changed);
@@ -36,10 +36,10 @@ fn test_fact_emit_jsonl_roundtrip() {
 
 #[test]
 fn test_observation_job_geo_analysis() {
-    let job = ObservationJob {
+    let job = ObservationTask {
         job_id: "test-001".into(),
         domain: "example.com".into(),
-        job_kind: ObservationJobKind::GeoAnalysis {
+        task_kind: ObservationTaskKind::GeoAnalysis {
             ip_addresses: vec!["1.1.1.1".into(), "223.5.5.5".into()],
             cname_chain: vec!["cdn.example.com.".into()],
         },
@@ -49,10 +49,10 @@ fn test_observation_job_geo_analysis() {
     };
 
     let json = serde_json::to_string(&job).unwrap();
-    let parsed: ObservationJob = serde_json::from_str(&json).unwrap();
+    let parsed: ObservationTask = serde_json::from_str(&json).unwrap();
     assert_eq!(parsed.domain, "example.com");
     assert_eq!(parsed.current_phase, GovernancePhase::Learning);
-    if let ObservationJobKind::GeoAnalysis { ip_addresses, .. } = &parsed.job_kind {
+    if let ObservationTaskKind::GeoAnalysis { ip_addresses, .. } = &parsed.task_kind {
         assert_eq!(ip_addresses.len(), 2);
     } else {
         panic!("expected GeoAnalysis");
@@ -61,10 +61,10 @@ fn test_observation_job_geo_analysis() {
 
 #[test]
 fn test_observation_job_tls_probe() {
-    let job = ObservationJob {
+    let job = ObservationTask {
         job_id: "test-002".into(),
         domain: "example.com".into(),
-        job_kind: ObservationJobKind::TlsProbe {
+        task_kind: ObservationTaskKind::TlsProbe {
             sni_domain: "example.com".into(),
             target_ip: "223.5.5.5".into(),
         },
@@ -74,10 +74,10 @@ fn test_observation_job_tls_probe() {
     };
 
     let json = serde_json::to_string(&job).unwrap();
-    let parsed: ObservationJob = serde_json::from_str(&json).unwrap();
+    let parsed: ObservationTask = serde_json::from_str(&json).unwrap();
     assert_eq!(
-        parsed.job_kind,
-        ObservationJobKind::TlsProbe {
+        parsed.task_kind,
+        ObservationTaskKind::TlsProbe {
             sni_domain: "example.com".into(),
             target_ip: "223.5.5.5".into(),
         }
@@ -86,10 +86,10 @@ fn test_observation_job_tls_probe() {
 
 #[test]
 fn test_observation_job_latency_probe() {
-    let job = ObservationJob {
+    let job = ObservationTask {
         job_id: "test-003".into(),
         domain: "example.com".into(),
-        job_kind: ObservationJobKind::LatencyProbe {
+        task_kind: ObservationTaskKind::LatencyProbe {
             target_ip: "1.1.1.1".into(),
         },
         current_phase: GovernancePhase::Learning,
@@ -98,10 +98,10 @@ fn test_observation_job_latency_probe() {
     };
 
     let json = serde_json::to_string(&job).unwrap();
-    let parsed: ObservationJob = serde_json::from_str(&json).unwrap();
+    let parsed: ObservationTask = serde_json::from_str(&json).unwrap();
     assert_eq!(
-        parsed.job_kind,
-        ObservationJobKind::LatencyProbe {
+        parsed.task_kind,
+        ObservationTaskKind::LatencyProbe {
             target_ip: "1.1.1.1".into()
         }
     );
@@ -109,10 +109,10 @@ fn test_observation_job_latency_probe() {
 
 #[test]
 fn test_observation_job_third_party_fetch() {
-    let job = ObservationJob {
+    let job = ObservationTask {
         job_id: "test-004".into(),
         domain: "example.com".into(),
-        job_kind: ObservationJobKind::ThirdPartyFetch {
+        task_kind: ObservationTaskKind::ThirdPartyFetch {
             observer_id: "cn-shanghai-1".into(),
             domain: "example.com".into(),
         },
@@ -122,10 +122,10 @@ fn test_observation_job_third_party_fetch() {
     };
 
     let json = serde_json::to_string(&job).unwrap();
-    let parsed: ObservationJob = serde_json::from_str(&json).unwrap();
+    let parsed: ObservationTask = serde_json::from_str(&json).unwrap();
     assert_eq!(
-        parsed.job_kind,
-        ObservationJobKind::ThirdPartyFetch {
+        parsed.task_kind,
+        ObservationTaskKind::ThirdPartyFetch {
             observer_id: "cn-shanghai-1".into(),
             domain: "example.com".into(),
         }

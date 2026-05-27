@@ -1,7 +1,7 @@
 //! Background workers for BorderDNS governance.
 //!
-//! - `FactWriterWorker`: consumes `FactEmit` from the channel and writes to JSONL.
-//! - `ObservationWorker`: consumes `ObservationJob` from the channel (currently logs only).
+//! - `FactWriterWorker`: consumes `FactEmitter` from the channel and writes to JSONL.
+//! - `ObservationWorker`: consumes `ObservationTask` from the channel (currently logs only).
 //! - `GovernanceMaintenanceWorker`: periodically decays 24h counters and generates
 //!   review candidate artifacts.
 
@@ -9,11 +9,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Utc;
-use facts::FactEmit;
-use facts::FactStoreWriter;
+use facts::FactEmitter;
+use facts::FactEventWriter;
 use facts::GovernancePhase;
-use facts::GovernanceStore;
-use facts::ObservationJob;
+use facts::GovernanceStateStore;
+use facts::ObservationTask;
 use facts::ReviewCandidatesArtifact;
 use facts::ReviewDomainEntry;
 use facts::ReviewSummary;
@@ -24,11 +24,11 @@ use tracing::warn;
 
 /// Spawn the fact writer background worker.
 ///
-/// Consumes `FactEmit` messages from the channel and writes them to the
+/// Consumes `FactEmitter` messages from the channel and writes them to the
 /// JSONL fact store. Runs until the channel is closed.
 pub fn spawn_fact_writer(
-    mut rx: mpsc::UnboundedReceiver<FactEmit>,
-    store: Arc<FactStoreWriter>,
+    mut rx: mpsc::UnboundedReceiver<FactEmitter>,
+    store: Arc<FactEventWriter>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         info!("fact writer worker started");
@@ -43,10 +43,10 @@ pub fn spawn_fact_writer(
 
 /// Spawn the observation background worker.
 ///
-/// Consumes `ObservationJob` messages. Currently logs jobs; TLS/latency
+/// Consumes `ObservationTask` messages from the channel (currently logs only).
 /// probe execution will be added in a future sprint.
 pub fn spawn_observation_worker(
-    mut rx: mpsc::UnboundedReceiver<ObservationJob>,
+    mut rx: mpsc::UnboundedReceiver<ObservationTask>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         info!("observation worker started");
@@ -72,8 +72,8 @@ pub fn spawn_observation_worker(
 /// 2. Generates a review candidates artifact.
 /// 3. Applies fact store retention (seals/removes old JSONL files).
 pub fn spawn_governance_maintenance(
-    governance_store: Arc<GovernanceStore>,
-    fact_store: Option<Arc<FactStoreWriter>>,
+    governance_store: Arc<GovernanceStateStore>,
+    fact_store: Option<Arc<FactEventWriter>>,
     interval: Duration,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
@@ -122,7 +122,9 @@ pub fn spawn_governance_maintenance(
 /// Generate a `ReviewCandidatesArtifact` from the current governance store state.
 ///
 /// Collects domains in Review or Fallback phase and builds the artifact.
-pub fn generate_review_candidates(governance_store: &GovernanceStore) -> ReviewCandidatesArtifact {
+pub fn generate_review_candidates(
+    governance_store: &GovernanceStateStore,
+) -> ReviewCandidatesArtifact {
     let mut review_domains = Vec::new();
     let mut fallback_domains = Vec::new();
 
@@ -208,7 +210,7 @@ fn determine_review_reason(state: &facts::DomainGovernanceState) -> String {
 
 /// Print startup review summary to the log.
 pub fn log_startup_review_summary(
-    governance_store: &GovernanceStore,
+    governance_store: &GovernanceStateStore,
     third_party_enabled: bool,
     fact_store_path: &str,
 ) {

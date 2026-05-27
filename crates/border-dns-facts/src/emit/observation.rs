@@ -1,6 +1,6 @@
-//! Async observation job model for BorderDNS governance.
+//! Async observation task model for BorderDNS governance.
 //!
-//! Observation jobs are enqueued by the pipeline hot path and consumed
+//! Observation tasks are enqueued by the pipeline hot path and consumed
 //! by background workers. The hot path never blocks on observation results.
 
 use chrono::DateTime;
@@ -18,13 +18,13 @@ use crate::MeaningfulEventKind;
 /// The hot path emits this to request async analysis. The worker processes
 /// it and updates governance state off the hot path.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ObservationJob {
+pub struct ObservationTask {
     /// Unique job identifier (ULID or similar).
     pub job_id: String,
     /// Domain being observed.
     pub domain: String,
     /// The type of observation requested.
-    pub job_kind: ObservationJobKind,
+    pub task_kind: ObservationTaskKind,
     /// Current governance phase at time of enqueue.
     pub current_phase: GovernancePhase,
     /// Current route at time of enqueue.
@@ -35,7 +35,7 @@ pub struct ObservationJob {
 
 /// The kind of observation job.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ObservationJobKind {
+pub enum ObservationTaskKind {
     /// Analyze DNS answer for geo evidence and CNAME chain.
     GeoAnalysis {
         /// IP addresses extracted from the answer (A/AAAA).
@@ -72,7 +72,7 @@ pub enum ObservationJobKind {
 /// It wraps the existing `BorderDnsFactEvent` with a domain key and event kind
 /// for efficient indexing.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FactEmit {
+pub struct FactEmitter {
     /// Domain this fact relates to.
     pub domain: String,
     /// The kind of meaningful event.
@@ -89,7 +89,7 @@ pub struct FactEmit {
     pub context: std::collections::BTreeMap<String, String>,
 }
 
-impl FactEmit {
+impl FactEmitter {
     /// Create a new fact emit.
     #[must_use]
     pub fn new(domain: String, event_kind: MeaningfulEventKind, reason_code: String) -> Self {

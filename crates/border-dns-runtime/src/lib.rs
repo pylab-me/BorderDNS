@@ -11,12 +11,12 @@ pub mod server;
 use std::sync::Arc;
 
 use dns_transport::MetricsRegistry;
-use facts::FactEmit;
-use facts::FactStoreWriter;
-use facts::GovernanceStore;
-use facts::ObservationJob;
-use route_cache::DnsCache;
-use runtime_config::Config;
+use facts::FactEmitter;
+use facts::FactEventWriter;
+use facts::GovernanceStateStore;
+use facts::ObservationTask;
+use route_cache::RouteScopedCache;
+use runtime_config::RuntimeConfig;
 use tokio::sync::Notify;
 use tokio::sync::mpsc;
 use tracing::info;
@@ -25,9 +25,9 @@ use tracing::info;
 #[derive(Debug)]
 pub struct RuntimeContext {
     /// Loaded configuration.
-    pub config: Config,
+    pub config: RuntimeConfig,
     /// DNS response cache.
-    pub cache: Arc<DnsCache>,
+    pub cache: Arc<RouteScopedCache>,
     /// Per-transport metrics.
     pub metrics: Arc<MetricsRegistry>,
     /// Shutdown signal.
@@ -37,8 +37,8 @@ pub struct RuntimeContext {
 impl RuntimeContext {
     /// Create a new runtime context from configuration.
     #[must_use]
-    pub fn new(config: Config) -> Self {
-        let cache = Arc::new(DnsCache::new(config.cache.clone()));
+    pub fn new(config: RuntimeConfig) -> Self {
+        let cache = Arc::new(RouteScopedCache::new(config.cache.clone()));
         Self {
             config,
             cache,
@@ -79,7 +79,7 @@ pub fn init_tracing(verbose: bool) -> anyhow::Result<()> {
 /// # Errors
 ///
 /// Returns error on server startup failure.
-pub async fn run(config: Config, verbose: bool) -> anyhow::Result<()> {
+pub async fn run(config: RuntimeConfig, verbose: bool) -> anyhow::Result<()> {
     init_tracing(verbose)?;
 
     let ctx = Arc::new(RuntimeContext::new(config));
@@ -87,11 +87,11 @@ pub async fn run(config: Config, verbose: bool) -> anyhow::Result<()> {
     info!("BorderDNS runtime starting");
 
     // ── Governance infrastructure ────────────────────────────────
-    let governance_store = Arc::new(GovernanceStore::new());
+    let governance_store = Arc::new(GovernanceStateStore::new());
 
     // Fact store writer — writes JSONL to state/facts/ under current directory.
     let fact_store_dir = std::path::PathBuf::from("state/facts");
-    let fact_store = match FactStoreWriter::new(fact_store_dir) {
+    let fact_store = match FactEventWriter::new(fact_store_dir) {
         Ok(writer) => Some(Arc::new(writer)),
         Err(e) => {
             tracing::warn!(error = %e, "failed to create fact store writer, JSONL persistence disabled");
@@ -100,8 +100,8 @@ pub async fn run(config: Config, verbose: bool) -> anyhow::Result<()> {
     };
 
     // Create channels for fact emission and observation jobs.
-    let (_fact_tx, fact_rx) = mpsc::unbounded_channel::<FactEmit>();
-    let (_observation_tx, observation_rx) = mpsc::unbounded_channel::<ObservationJob>();
+    let (_fact_tx, fact_rx) = mpsc::unbounded_channel::<FactEmitter>();
+    let (_observation_tx, observation_rx) = mpsc::unbounded_channel::<ObservationTask>();
 
     // Spawn background workers.
     if let Some(ref fs) = fact_store {

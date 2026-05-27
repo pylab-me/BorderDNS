@@ -12,7 +12,6 @@ pub use error::ConfigError;
 pub use model::BlackholeConfig;
 pub use model::BlockConfig;
 pub use model::CacheConfig;
-pub use model::Config;
 pub use model::DnsProtocol;
 pub use model::DoHListenerConfig;
 pub use model::DoJListenerConfig;
@@ -21,6 +20,7 @@ pub use model::HostsConfig;
 pub use model::ListenerAddr;
 pub use model::ListenersConfig;
 pub use model::ResolverConfig;
+pub use model::RuntimeConfig;
 pub use model::ServerConfig;
 pub use model::TcpListenerConfig;
 pub use model::ThirdPartyConfig;
@@ -35,7 +35,7 @@ pub use model::UpstreamServer;
 /// # Errors
 ///
 /// Returns error on file read failure, TOML parse error, or validation error.
-pub fn load_from_file(path: &Path) -> Result<Config, ConfigError> {
+pub fn load_from_file(path: &Path) -> Result<RuntimeConfig, ConfigError> {
     let content = std::fs::read_to_string(path).map_err(|e| ConfigError::Io {
         path: path.display().to_string(),
         source: e,
@@ -48,8 +48,8 @@ pub fn load_from_file(path: &Path) -> Result<Config, ConfigError> {
 /// # Errors
 ///
 /// Returns error on TOML parse error or validation error.
-pub fn load_from_str(s: &str) -> Result<Config, ConfigError> {
-    let config: Config = toml::from_str(s).map_err(|e| ConfigError::Parse(e.to_string()))?;
+pub fn load_from_str(s: &str) -> Result<RuntimeConfig, ConfigError> {
+    let config: RuntimeConfig = toml::from_str(s).map_err(|e| ConfigError::Parse(e.to_string()))?;
     config.validate()?;
     Ok(config)
 }

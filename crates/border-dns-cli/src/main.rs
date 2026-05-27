@@ -110,7 +110,7 @@ fn main() -> Result<()> {
         },
         Commands::InspectCache { config } => {
             let config = runtime_config::load_from_file(&config)?;
-            let cache = route_cache::DnsCache::new(config.cache.clone());
+            let cache = route_cache::RouteScopedCache::new(config.cache.clone());
             let stats = cache.stats();
             println!("Cache statistics:");
             println!("  entries: {}", stats.entries);

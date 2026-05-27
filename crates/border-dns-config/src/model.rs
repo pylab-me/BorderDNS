@@ -15,7 +15,7 @@ use crate::error::ConfigError;
 
 /// Top-level BorderDNS configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Config {
+pub struct RuntimeConfig {
     /// Server-level defaults (timeouts, concurrency).
     pub server: ServerConfig,
     /// Named listener configurations.
@@ -42,7 +42,7 @@ pub struct Config {
     pub blackhole: BlackholeConfig,
 }
 
-impl Config {
+impl RuntimeConfig {
     /// Validate the configuration.
     ///
     /// # Errors
