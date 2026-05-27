@@ -1,9 +1,13 @@
 //! CLI entrypoint for BorderDNS.
 //!
 //! Commands:
-//!   - `border-dns run -c <config>` — Start the DNS resolver runtime.
-//!   - `border-dns validate-config -c <config>` — Validate a config file.
-//!   - `border-dns inspect-cache` — Show cache statistics (placeholder).
+//!   - `border-cli run -c <config>` — Start the DNS resolver runtime.
+//!   - `border-cli validate-config -c <config>` — Validate a config file.
+//!   - `border-cli inspect-cache` — Show cache statistics (placeholder).
+//!
+//! A subcommand is required; omitting one prints help.
+//!
+//! For the simple "just run" use case, use the `border-dns` binary instead.
 
 use std::path::PathBuf;
 
@@ -13,7 +17,7 @@ use clap::Subcommand;
 
 /// BorderDNS — facts-aware DNS governance loop.
 #[derive(Parser)]
-#[command(name = "border-dns", version, about)]
+#[command(name = "border-cli", version, about)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
