@@ -218,12 +218,21 @@ async fn forward_single(
 // ─── UDP upstream ────────────────────────────────────────────────
 
 /// Forward a DNS query via UDP.
+///
+/// Binds to `[::]:0` (dual-stack) when the target is IPv6,
+/// or `0.0.0.0:0` when IPv4, so that upstream IPv6 servers work.
 async fn forward_udp(
     wire: &[u8],
     addr: SocketAddr,
     timeout_dur: Duration,
 ) -> Result<Vec<u8>, UpstreamError> {
-    let socket = tokio::net::UdpSocket::bind("0.0.0.0:0").await?;
+    // Bind to a wildcard address matching the target's address family.
+    let bind_addr: SocketAddr = if addr.is_ipv6() {
+        "[::]:0".parse().unwrap()
+    } else {
+        "0.0.0.0:0".parse().unwrap()
+    };
+    let socket = tokio::net::UdpSocket::bind(bind_addr).await?;
 
     tokio::time::timeout(timeout_dur, async {
         socket.send_to(wire, addr).await?;

@@ -3,10 +3,15 @@
 //! Sprint 1-1: UDP, TCP, DoT (DNS over TLS), DoH (DNS over HTTPS), DoJ (JSON facade).
 //! DoQ (DNS over QUIC) is deferred to a later sprint.
 //!
-//! DoH uses `axum_server::bind_rustls` for TLS termination.
-//! DoJ uses plain `axum::serve`.
+//! Fixes applied:
+//! - IPv6 dual-stack: set `IPV6_V6ONLY=0` on all TCP/UDP sockets so that
+//!   binding `[::]` also accepts IPv4 connections (Windows default is v6-only).
+//! - Rebind retry: every server loop retries bind with exponential backoff
+//!   on socket-level failure, instead of silently exiting.
+//! - UDP receive buffer set to 256 KB for high-throughput scenarios.
 
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -39,68 +44,210 @@ use tracing::warn;
 use crate::RuntimeContext;
 use crate::handler;
 
+// ─── Rebind helper ───────────────────────────────────────────────
+
+/// Maximum backoff when re-binding a socket after failure.
+const MAX_REBIND_BACKOFF: Duration = Duration::from_secs(60);
+
+/// Minimum backoff when re-binding.
+const MIN_REBIND_BACKOFF: Duration = Duration::from_secs(1);
+
+/// Rebind loop: calls `bind_fn` in a retry loop with exponential backoff.
+/// Yields each successfully bound value to `on_ready` which runs the server
+/// loop. If the server loop returns (error or success), the bind is retried.
+async fn rebind_loop<F, Fut, B, R, RFut>(
+    name: &str,
+    addr: &str,
+    mut bind_fn: F,
+    mut on_ready: R,
+) -> anyhow::Result<()>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<B>>,
+    R: FnMut(B) -> RFut,
+    RFut: std::future::Future<Output = anyhow::Result<()>>,
+{
+    let mut backoff = MIN_REBIND_BACKOFF;
+
+    loop {
+        match bind_fn().await {
+            Ok(bound) => {
+                backoff = MIN_REBIND_BACKOFF;
+                info!(address = %addr, "{name} server listening");
+                match on_ready(bound).await {
+                    Ok(()) => {
+                        warn!(address = %addr, "{name} server exited cleanly, rebinding");
+                    }
+                    Err(e) => {
+                        error!(address = %addr, error = %e, "{name} server error, rebinding");
+                    }
+                }
+            }
+            Err(e) => {
+                error!(
+                    address = %addr,
+                    error = %e,
+                    backoff_secs = backoff.as_secs(),
+                    "{name} bind failed, retrying"
+                );
+            }
+        }
+        tokio::time::sleep(backoff).await;
+        backoff = (backoff * 2).min(MAX_REBIND_BACKOFF);
+    }
+}
+
+// ─── Dual-stack socket helper ────────────────────────────────────
+
+/// Create a `socket2::Socket` bound to `addr` with dual-stack enabled.
+///
+/// On IPv6 addresses, sets `IPV6_V6ONLY=0` so that `[::]` accepts both
+/// IPv4 and IPv6 connections (fixes Windows default of v6-only).
+fn bind_dual_stack_udp(addr: SocketAddr) -> std::io::Result<tokio::net::UdpSocket> {
+    use socket2::Protocol;
+    use socket2::SockAddr;
+    use socket2::Type;
+
+    let domain = if addr.is_ipv4() {
+        socket2::Domain::IPV4
+    } else {
+        socket2::Domain::IPV6
+    };
+    let sock = socket2::Socket::new(domain, Type::DGRAM, Some(Protocol::UDP))?;
+    if addr.is_ipv6() {
+        sock.set_only_v6(false)?;
+    }
+    sock.set_reuse_address(true)?;
+    sock.bind(&SockAddr::from(addr))?;
+    sock.set_nonblocking(true)?;
+    // Bump receive buffer for high-throughput DNS.
+    let _ = sock.set_recv_buffer_size(256 * 1024);
+    let _ = sock.set_send_buffer_size(256 * 1024);
+    let std_sock: std::net::UdpSocket = sock.into();
+    tokio::net::UdpSocket::from_std(std_sock)
+}
+
+/// Create a `socket2::Socket` for TCP listening with dual-stack enabled.
+fn bind_dual_stack_tcp(addr: SocketAddr) -> std::io::Result<tokio::net::TcpListener> {
+    use socket2::Protocol;
+    use socket2::SockAddr;
+    use socket2::Type;
+
+    let domain = if addr.is_ipv4() {
+        socket2::Domain::IPV4
+    } else {
+        socket2::Domain::IPV6
+    };
+    let sock = socket2::Socket::new(domain, Type::STREAM, Some(Protocol::TCP))?;
+    if addr.is_ipv6() {
+        sock.set_only_v6(false)?;
+    }
+    sock.set_reuse_address(true)?;
+    sock.set_tcp_nodelay(true)?;
+    sock.bind(&SockAddr::from(addr))?;
+    // DNS servers don't need large backlog — 128 is plenty.
+    sock.listen(128)?;
+    sock.set_nonblocking(true)?;
+    let std_listener: std::net::TcpListener = sock.into();
+    tokio::net::TcpListener::from_std(std_listener)
+}
+
 // ─── UDP DNS Server ───────────────────────────────────────────────
 
 /// Run a UDP DNS server on the given address.
 ///
-/// # Errors
-///
-/// Returns error on socket bind failure.
+/// Uses `socket2` for dual-stack IPv6 (IPV6_V6ONLY=0). If the socket
+/// errors out (e.g. after Windows hibernation), automatically rebinds
+/// with exponential backoff.
 pub async fn run_udp(addr: String, ctx: Arc<RuntimeContext>) -> anyhow::Result<()> {
-    let socket = Arc::new(tokio::net::UdpSocket::bind(&addr).await?);
-    info!(address = %addr, "UDP server listening");
+    let sock_addr: SocketAddr = addr
+        .parse()
+        .map_err(|e| anyhow::anyhow!("invalid UDP listen address '{addr}': {e}"))?;
 
-    loop {
-        let mut buf = vec![0u8; 4096];
-        let socket = Arc::clone(&socket);
-        let ctx = Arc::clone(&ctx);
-
-        let (len, peer) = match socket.recv_from(&mut buf).await {
-            Ok(v) => v,
-            Err(e) => {
-                error!(error = %e, "UDP recv error");
-                continue;
+    rebind_loop(
+        "UDP",
+        &addr,
+        || {
+            let addr = sock_addr;
+            async move {
+                bind_dual_stack_udp(addr).map_err(|e| anyhow::anyhow!("UDP bind '{addr}': {e}"))
             }
-        };
-        buf.truncate(len);
+        },
+        |socket| {
+            let ctx = Arc::clone(&ctx);
+            async move {
+                let socket = Arc::new(socket);
+                loop {
+                    let mut buf = vec![0u8; 4096];
+                    let sock = Arc::clone(&socket);
+                    let ctx = Arc::clone(&ctx);
 
-        ctx.metrics.udp.record_request();
+                    let (len, peer) = match sock.recv_from(&mut buf).await {
+                        Ok(v) => v,
+                        Err(e) => {
+                            // Fatal socket error → return Err to trigger rebind.
+                            error!(error = %e, "UDP recv fatal error, rebinding");
+                            return Err(e.into());
+                        }
+                    };
+                    buf.truncate(len);
 
-        tokio::spawn(async move {
-            let meta = RequestMeta::new(TransportKind::Udp, Some(peer));
-            let resp = handler::handle_dns_query(&buf, &ctx, &meta).await;
-            let resp_bytes = resp.to_wire();
-            if let Err(e) = socket.send_to(&resp_bytes, peer).await {
-                debug!(error = %e, peer = %peer, "UDP send error");
+                    ctx.metrics.udp.record_request();
+
+                    tokio::spawn(async move {
+                        let meta = RequestMeta::new(TransportKind::Udp, Some(peer));
+                        let resp = handler::handle_dns_query(&buf, &ctx, &meta).await;
+                        let resp_bytes = resp.to_wire();
+                        if let Err(e) = sock.send_to(&resp_bytes, peer).await {
+                            debug!(error = %e, peer = %peer, "UDP send error");
+                        }
+                    });
+                }
             }
-        });
-    }
+        },
+    )
+    .await
 }
 
 // ─── TCP DNS Server ───────────────────────────────────────────────
 
 /// Run a TCP DNS server on the given address.
 ///
-/// # Errors
-///
-/// Returns error on bind failure.
+/// Uses dual-stack socket with rebind retry.
 pub async fn run_tcp(addr: String, ctx: Arc<RuntimeContext>) -> anyhow::Result<()> {
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
-    info!(address = %addr, "TCP server listening");
+    let sock_addr: SocketAddr = addr
+        .parse()
+        .map_err(|e| anyhow::anyhow!("invalid TCP listen address '{addr}': {e}"))?;
 
-    let timeout_dur = Duration::from_millis(ctx.config.server.default_timeout_ms);
-
-    loop {
-        let (stream, peer) = listener.accept().await?;
-        let ctx = Arc::clone(&ctx);
-
-        tokio::spawn(async move {
-            ctx.metrics.tcp.record_request();
-            if let Err(e) = handle_tcp_connection(stream, peer, ctx, timeout_dur).await {
-                debug!(error = %e, peer = %peer, "TCP connection error");
+    rebind_loop(
+        "TCP",
+        &addr,
+        || {
+            let addr = sock_addr;
+            async move {
+                bind_dual_stack_tcp(addr).map_err(|e| anyhow::anyhow!("TCP bind '{addr}': {e}"))
             }
-        });
-    }
+        },
+        |listener| {
+            let ctx = Arc::clone(&ctx);
+            async move {
+                let timeout_dur = Duration::from_millis(ctx.config.server.default_timeout_ms);
+                loop {
+                    let (stream, peer) = listener.accept().await?;
+                    let ctx = Arc::clone(&ctx);
+
+                    tokio::spawn(async move {
+                        ctx.metrics.tcp.record_request();
+                        if let Err(e) = handle_tcp_connection(stream, peer, ctx, timeout_dur).await
+                        {
+                            debug!(error = %e, peer = %peer, "TCP connection error");
+                        }
+                    });
+                }
+            }
+        },
+    )
+    .await
 }
 
 /// Handle a single TCP DNS connection (may contain multiple queries).
@@ -153,31 +300,47 @@ async fn handle_tcp_connection(
 /// Run a DNS-over-TLS server.
 ///
 /// DoT = TLS stream + DNS-over-TCP framing (2-byte length prefix).
-///
-/// # Errors
-///
-/// Returns error on TLS config or bind failure.
+/// Uses dual-stack TCP socket with rebind retry.
 pub async fn run_dot(cfg: TlsListenerConfig, ctx: Arc<RuntimeContext>) -> anyhow::Result<()> {
     let tls_config = load_tls_server_config(&cfg.cert_file, &cfg.key_file)?;
     let tls_config = Arc::new(tls_config);
-    let listener = tokio::net::TcpListener::bind(&cfg.listen).await?;
-    info!(address = %cfg.listen, "DoT server listening");
+    let sock_addr: SocketAddr = cfg
+        .listen
+        .parse()
+        .map_err(|e| anyhow::anyhow!("invalid DoT listen address '{}': {}", cfg.listen, e))?;
 
-    let idle_timeout = Duration::from_millis(cfg.idle_timeout_ms);
-
-    loop {
-        let (stream, peer) = listener.accept().await?;
-        let ctx = Arc::clone(&ctx);
-        let tls_config = Arc::clone(&tls_config);
-
-        tokio::spawn(async move {
-            ctx.metrics.tls.record_request();
-            if let Err(e) = handle_tls_connection(stream, peer, ctx, tls_config, idle_timeout).await
-            {
-                debug!(error = %e, peer = %peer, "DoT connection error");
+    rebind_loop(
+        "DoT",
+        &cfg.listen,
+        || {
+            let addr = sock_addr;
+            async move {
+                bind_dual_stack_tcp(addr).map_err(|e| anyhow::anyhow!("DoT bind '{addr}': {e}"))
             }
-        });
-    }
+        },
+        |listener| {
+            let ctx = Arc::clone(&ctx);
+            let tls_config = Arc::clone(&tls_config);
+            let idle_timeout = Duration::from_millis(cfg.idle_timeout_ms);
+            async move {
+                loop {
+                    let (stream, peer) = listener.accept().await?;
+                    let ctx = Arc::clone(&ctx);
+                    let tls_config = Arc::clone(&tls_config);
+
+                    tokio::spawn(async move {
+                        ctx.metrics.tls.record_request();
+                        if let Err(e) =
+                            handle_tls_connection(stream, peer, ctx, tls_config, idle_timeout).await
+                        {
+                            debug!(error = %e, peer = %peer, "DoT connection error");
+                        }
+                    });
+                }
+            }
+        },
+    )
+    .await
 }
 
 /// Handle a TLS DNS connection (DoT).
@@ -242,6 +405,10 @@ async fn handle_tls_connection(
 ///
 /// Uses `axum_server::bind_rustls` for TLS termination — no manual
 /// hyper connection handling needed.
+///
+/// Note: `axum_server` manages its own socket, so dual-stack is not
+/// directly controllable. If IPv6-only is needed, bind to `[::]` and
+/// add a second listener for `0.0.0.0`.
 ///
 /// # Errors
 ///
@@ -385,34 +552,49 @@ struct DoJAnswer {
 /// GET /resolve?name=example.com&type=A
 /// ```
 ///
-/// Uses plain `axum::serve` (no TLS — DoJ is a local/API facade).
+/// Uses dual-stack TCP socket with rebind retry.
 ///
 /// # Errors
 ///
 /// Returns error on bind failure.
 pub async fn run_doj(cfg: DoJListenerConfig, ctx: Arc<RuntimeContext>) -> anyhow::Result<()> {
     let path = cfg.path.clone();
-
-    let app = Router::new()
-        .route(&path, get(doj_resolve_handler))
-        .with_state(Arc::clone(&ctx));
-
-    let addr: std::net::SocketAddr = cfg
+    let sock_addr: SocketAddr = cfg
         .listen
         .parse()
         .map_err(|e| anyhow::anyhow!("invalid DoJ listen address '{}': {}", cfg.listen, e))?;
 
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    info!(
-        address = %cfg.listen,
-        path = %cfg.path,
-        profile = %cfg.profile,
-        "DoJ server listening"
-    );
+    rebind_loop(
+        "DoJ",
+        &cfg.listen,
+        || {
+            let addr = sock_addr;
+            async move {
+                bind_dual_stack_tcp(addr).map_err(|e| anyhow::anyhow!("DoJ bind '{addr}': {e}"))
+            }
+        },
+        |listener| {
+            let ctx = Arc::clone(&ctx);
+            let path = path.clone();
+            let profile = cfg.profile.clone();
+            async move {
+                let app = Router::new()
+                    .route(&path, get(doj_resolve_handler))
+                    .with_state(Arc::clone(&ctx));
 
-    axum::serve(listener, app.into_make_service())
-        .await
-        .map_err(|e| anyhow::anyhow!("DoJ server error: {e}"))
+                info!(
+                    path = %path,
+                    profile = %profile,
+                    "DoJ handler registered"
+                );
+
+                axum::serve(listener, app.into_make_service())
+                    .await
+                    .map_err(|e| anyhow::anyhow!("DoJ server error: {e}"))
+            }
+        },
+    )
+    .await
 }
 
 /// DoJ resolve handler: `GET /resolve?name=example.com&type=A`

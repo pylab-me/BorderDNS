@@ -13,7 +13,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 rust-version = "1.88"
 license = "Apache-2.0"
@@ -78,6 +78,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "time"]
 
 # Concurrent state
 dashmap = "6"
+socket2 = "0.6"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
