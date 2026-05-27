@@ -23,6 +23,7 @@ mod governance_state;
 mod governance_store;
 mod observation;
 mod schema_version;
+mod store_manifest;
 
 pub use enums::*;
 pub use fact_event::*;
@@ -30,3 +31,4 @@ pub use governance_state::*;
 pub use governance_store::*;
 pub use observation::*;
 pub use schema_version::*;
+pub use store_manifest::*;

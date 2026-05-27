@@ -10,7 +10,9 @@ use std::time::Instant;
 
 use border_dns_cache::DnsCache;
 use border_dns_config::Config;
+use border_dns_domain_knowledge::BlockMatcher;
 use border_dns_domain_knowledge::BuiltInDomainKnowledge;
+use border_dns_domain_knowledge::HostsTable;
 use border_dns_facts::FactEmit;
 use border_dns_facts::GovernancePhase;
 use border_dns_facts::GovernanceStore;
@@ -57,7 +59,7 @@ pub struct QueryContext {
 
 /// The DNS query pipeline.
 ///
-/// Orchestrates: route determination → cache lookup → upstream resolve → answer selection.
+/// Orchestrates: hosts override → block → route determination → cache lookup → upstream resolve → answer selection.
 #[derive(Debug)]
 pub struct Pipeline {
     config: Arc<Config>,
@@ -67,6 +69,10 @@ pub struct Pipeline {
     route_policy: Arc<RoutePolicy>,
     governance_store: Arc<GovernanceStore>,
     governance_thresholds: Arc<GovernanceThresholds>,
+    /// Hosts override table (static domain → IP).
+    hosts: Arc<HostsTable>,
+    /// Domain block matcher.
+    block_matcher: Arc<BlockMatcher>,
     /// Channel sender for fact emissions (non-blocking).
     fact_tx: tokio::sync::mpsc::UnboundedSender<FactEmit>,
     /// Channel sender for observation jobs (non-blocking).
@@ -94,6 +100,9 @@ impl Pipeline {
         let (fact_tx, _fact_rx) = tokio::sync::mpsc::unbounded_channel();
         let (observation_tx, _observation_rx) = tokio::sync::mpsc::unbounded_channel();
 
+        let hosts = Arc::new(Self::build_hosts_from_config(&config.hosts));
+        let block_matcher = Arc::new(Self::build_block_matcher_from_config(&config.block));
+
         Self {
             config,
             cache,
@@ -102,6 +111,8 @@ impl Pipeline {
             route_policy,
             governance_store,
             governance_thresholds,
+            hosts,
+            block_matcher,
             fact_tx,
             observation_tx,
         }
@@ -122,6 +133,8 @@ impl Pipeline {
         observation_tx: tokio::sync::mpsc::UnboundedSender<ObservationJob>,
     ) -> Self {
         let route_policy = Arc::new(RoutePolicy::new(config.resolver.location));
+        let hosts = Arc::new(Self::build_hosts_from_config(&config.hosts));
+        let block_matcher = Arc::new(Self::build_block_matcher_from_config(&config.block));
 
         Self {
             config,
@@ -131,6 +144,8 @@ impl Pipeline {
             route_policy,
             governance_store,
             governance_thresholds,
+            hosts,
+            block_matcher,
             fact_tx,
             observation_tx,
         }
@@ -172,6 +187,55 @@ impl Pipeline {
 
         let domain_str = domain.to_string();
         let id = query.header.id;
+
+        // ── Stage 1.5: Hosts Override ───────────────────────────
+        if self.config.hosts.enabled {
+            let host_ips = self.hosts.match_domain(&domain_str, qtype);
+            if !host_ips.is_empty() {
+                let mut resp = DnsMessage::response(&query);
+                let rr_type = qtype.as_record_type().unwrap_or(dns_types::RecordType::A);
+                for ip in &host_ips {
+                    use dns_protocol::rr::RData;
+                    let rdata = match ip {
+                        std::net::IpAddr::V4(v4) => RData::A(*v4),
+                        std::net::IpAddr::V6(v6) => RData::AAAA(*v6),
+                    };
+                    let rr = dns_protocol::rr::ResourceRecord {
+                        name: domain.clone(),
+                        rr_type,
+                        class: dns_types::RecordClass::In,
+                        ttl: self.config.hosts.ttl_secs,
+                        rdata,
+                    };
+                    resp.add_answer(rr);
+                }
+                tracing::info!(
+                    transport = %meta.transport,
+                    peer = ?meta.peer_addr,
+                    id = id,
+                    qname = %domain_str,
+                    qtype = ?qtype,
+                    answers = resp.answers.len(),
+                    source = "hosts",
+                    "RESP"
+                );
+                return resp;
+            }
+        }
+
+        // ── Stage 1.6: Domain Block ─────────────────────────────
+        if self.config.block.enabled && self.block_matcher.is_blocked(&domain_str) {
+            tracing::info!(
+                transport = %meta.transport,
+                peer = ?meta.peer_addr,
+                id = id,
+                qname = %domain_str,
+                qtype = ?qtype,
+                source = "block",
+                "RESP"
+            );
+            return self.build_block_response(&query, qtype, &domain);
+        }
 
         // ── Stage 2: Route Determination ───────────────────────
         let decision = self
@@ -401,6 +465,108 @@ impl Pipeline {
                 resp
             }
         }
+    }
+
+    // ─── Hosts / Block config builder helpers ──────────────────────
+
+    fn build_hosts_from_config(hosts_config: &border_dns_config::HostsConfig) -> HostsTable {
+        if !hosts_config.enabled {
+            return HostsTable::new();
+        }
+        let mut builder = HostsTable::new();
+        for entry in &hosts_config.entries {
+            for ip_str in &entry.ips {
+                builder = builder.with_entry(&entry.domain, ip_str);
+            }
+        }
+        for file_path in &hosts_config.files {
+            builder = builder.with_file(std::path::PathBuf::from(file_path));
+        }
+        builder.build()
+    }
+
+    fn build_block_matcher_from_config(
+        block_config: &border_dns_config::BlockConfig,
+    ) -> BlockMatcher {
+        if !block_config.enabled {
+            return BlockMatcher::default();
+        }
+        let exact_refs: Vec<&str> = block_config.domains.iter().map(String::as_str).collect();
+        let suffix_refs: Vec<&str> = block_config.suffixes.iter().map(String::as_str).collect();
+        BlockMatcher::new(&exact_refs, &suffix_refs)
+    }
+
+    // ─── Block response builder ──────────────────────────────────
+
+    fn build_block_response(
+        &self,
+        query: &DnsMessage,
+        qtype: QType,
+        domain: &dns_protocol::name::DomainName,
+    ) -> DnsMessage {
+        use dns_protocol::header::ResponseCode;
+        use dns_protocol::rr::RData;
+        use dns_protocol::rr::ResourceRecord;
+        use dns_types::RecordType;
+
+        let mut resp = DnsMessage::response(query);
+
+        let blackhole_v4: std::net::Ipv4Addr = self
+            .config
+            .block
+            .blackhole_ipv4
+            .parse()
+            .unwrap_or(std::net::Ipv4Addr::LOCALHOST);
+        let blackhole_v6: std::net::Ipv6Addr = self
+            .config
+            .block
+            .blackhole_ipv6
+            .parse()
+            .unwrap_or(std::net::Ipv6Addr::UNSPECIFIED);
+
+        match qtype {
+            QType::Type(RecordType::A) => {
+                resp.add_answer(ResourceRecord {
+                    name: domain.clone(),
+                    rr_type: RecordType::A,
+                    class: dns_types::RecordClass::In,
+                    ttl: 60,
+                    rdata: RData::A(blackhole_v4),
+                });
+            }
+            QType::Type(RecordType::AAAA) => {
+                resp.add_answer(ResourceRecord {
+                    name: domain.clone(),
+                    rr_type: RecordType::AAAA,
+                    class: dns_types::RecordClass::In,
+                    ttl: 60,
+                    rdata: RData::AAAA(blackhole_v6),
+                });
+            }
+            _ => {
+                // Suppress: return SOA negative response.
+                resp.header.rcode = ResponseCode::NoError;
+                let soa_name = dns_protocol::name::DomainName::from_str("block.borderdns.local")
+                    .unwrap_or_else(|_| dns_protocol::name::DomainName::root());
+                resp.add_authority(ResourceRecord {
+                    name: domain.clone(),
+                    rr_type: RecordType::SOA,
+                    class: dns_types::RecordClass::In,
+                    ttl: 60,
+                    rdata: RData::SOA(dns_protocol::rr::SoaRecord {
+                        mname: soa_name.clone(),
+                        rname: soa_name,
+                        serial: 1,
+                        refresh: 900,
+                        retry: 900,
+                        expire: 1800,
+                        minimum: 60,
+                    }),
+                });
+            }
+        }
+
+        resp
     }
 }
 

@@ -323,6 +323,9 @@ fn test_config_serialize_roundtrip() {
         cache: CacheConfig::default(),
         resolver: ResolverConfig::default(),
         third_party: ThirdPartyConfig::default(),
+        hosts: HostsConfig::default(),
+        block: BlockConfig::default(),
+        blackhole: BlackholeConfig::default(),
     };
 
     let toml_str = toml::to_string(&config).unwrap();

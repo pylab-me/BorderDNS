@@ -101,3 +101,111 @@ fn test_domain_set_size() {
     assert!(knowledge.china_domains.len() > 0);
     assert!(knowledge.foreign_domains.len() > 0);
 }
+
+// ─── HostsTable tests ─────────────────────────────────────────────
+
+#[test]
+fn test_hosts_table_inline_entry_match_a() {
+    let table = HostsTable::new()
+        .with_entry("example.com", "1.2.3.4")
+        .with_entry("example.com", "::1")
+        .build();
+
+    let result = table.match_domain("example.com", QType::Type(RecordType::A));
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0], "1.2.3.4".parse::<std::net::IpAddr>().unwrap());
+}
+
+#[test]
+fn test_hosts_table_inline_entry_match_aaaa() {
+    let table = HostsTable::new()
+        .with_entry("example.com", "1.2.3.4")
+        .with_entry("example.com", "2001:db8::1")
+        .build();
+
+    let result = table.match_domain("example.com", QType::Type(RecordType::AAAA));
+    assert_eq!(result.len(), 1);
+    assert_eq!(
+        result[0],
+        "2001:db8::1".parse::<std::net::IpAddr>().unwrap()
+    );
+}
+
+#[test]
+fn test_hosts_table_no_match() {
+    let table = HostsTable::new()
+        .with_entry("example.com", "1.2.3.4")
+        .build();
+
+    let result = table.match_domain("other.com", QType::Type(RecordType::A));
+    assert!(result.is_empty());
+}
+
+#[test]
+fn test_hosts_table_trailing_dot_handling() {
+    let table = HostsTable::new()
+        .with_entry("example.com", "1.2.3.4")
+        .build();
+
+    let result = table.match_domain("example.com.", QType::Type(RecordType::A));
+    assert_eq!(result.len(), 1);
+}
+
+#[test]
+fn test_hosts_table_non_a_aaaa_qtype_returns_empty() {
+    let table = HostsTable::new()
+        .with_entry("example.com", "1.2.3.4")
+        .build();
+
+    let result = table.match_domain("example.com", QType::Type(RecordType::MX));
+    assert!(result.is_empty());
+}
+
+// ─── BlockMatcher tests ───────────────────────────────────────────
+
+#[test]
+fn test_block_matcher_exact_match() {
+    let matcher = BlockMatcher::new(&["ads.example.com", "tracker.evil.com"], &[]);
+    assert!(matcher.is_blocked("ads.example.com"));
+    assert!(matcher.is_blocked("tracker.evil.com"));
+    assert!(!matcher.is_blocked("safe.example.com"));
+}
+
+#[test]
+fn test_block_matcher_suffix_match() {
+    let matcher = BlockMatcher::new(&[], &["doubleclick.net", "adservice.google.com"]);
+    assert!(matcher.is_blocked("ad.doubleclick.net"));
+    assert!(matcher.is_blocked("tracker.ad.doubleclick.net"));
+    assert!(matcher.is_blocked("doubleclick.net"));
+    assert!(!matcher.is_blocked("doubleclick-other.net"));
+}
+
+#[test]
+fn test_block_matcher_combined() {
+    let matcher = BlockMatcher::new(&["exact.blocked.com"], &["suffix.blocked.com"]);
+    assert!(matcher.is_blocked("exact.blocked.com"));
+    assert!(matcher.is_blocked("sub.suffix.blocked.com"));
+    assert!(!matcher.is_blocked("not-blocked.com"));
+}
+
+#[test]
+fn test_block_matcher_case_insensitive() {
+    let matcher = BlockMatcher::new(&["Ads.Example.Com"], &[]);
+    assert!(matcher.is_blocked("ads.example.com"));
+    assert!(matcher.is_blocked("ADS.EXAMPLE.COM"));
+}
+
+#[test]
+fn test_block_matcher_empty() {
+    let matcher = BlockMatcher::default();
+    assert!(!matcher.is_blocked("anything.com"));
+    assert!(matcher.is_empty());
+    assert_eq!(matcher.rule_count(), 0);
+}
+
+#[test]
+fn test_block_matcher_trailing_dot() {
+    let matcher = BlockMatcher::new(&["example.com"], &[]);
+    assert!(matcher.is_blocked("example.com."));
+    assert!(matcher.is_blocked("example.com"));
+}

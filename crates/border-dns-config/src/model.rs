@@ -29,6 +29,15 @@ pub struct Config {
     /// Third-party observation configuration.
     #[serde(default)]
     pub third_party: ThirdPartyConfig,
+    /// Hosts override configuration.
+    #[serde(default)]
+    pub hosts: HostsConfig,
+    /// Domain block configuration.
+    #[serde(default)]
+    pub block: BlockConfig,
+    /// Blackhole HTTP acceptor configuration.
+    #[serde(default)]
+    pub blackhole: BlackholeConfig,
 }
 
 impl Config {
@@ -103,6 +112,32 @@ impl Config {
         }
         for server in &self.upstreams.foreign {
             server.validate()?;
+        }
+
+        // Validate block config IPs.
+        if self.block.enabled {
+            if self
+                .block
+                .blackhole_ipv4
+                .parse::<std::net::Ipv4Addr>()
+                .is_err()
+            {
+                return Err(ConfigError::Validation(format!(
+                    "block.blackhole_ipv4 '{}' is not a valid IPv4 address",
+                    self.block.blackhole_ipv4
+                )));
+            }
+            if self
+                .block
+                .blackhole_ipv6
+                .parse::<std::net::Ipv6Addr>()
+                .is_err()
+            {
+                return Err(ConfigError::Validation(format!(
+                    "block.blackhole_ipv6 '{}' is not a valid IPv6 address",
+                    self.block.blackhole_ipv6
+                )));
+            }
         }
 
         Ok(())
@@ -549,6 +584,130 @@ pub struct ThirdPartyPeerConfig {
 
 fn default_peer_trust_level() -> String {
     "normal".into()
+}
+
+// ─── Hosts override config ────────────────────────────────────────
+
+/// Hosts override configuration.
+///
+/// Allows static domain → IP overrides, similar to /etc/hosts.
+/// Supports inline entries and external hosts files.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct HostsConfig {
+    /// Whether hosts override is enabled.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Inline host entries: [{ domain = "example.com", ips = ["1.2.3.4"] }].
+    #[serde(default)]
+    pub entries: Vec<HostsEntry>,
+    /// Paths to hosts files to load (standard hosts format).
+    #[serde(default)]
+    pub files: Vec<String>,
+    /// TTL for host override responses in seconds (default: 60).
+    #[serde(default = "default_hosts_ttl")]
+    pub ttl_secs: u32,
+}
+
+impl HostsConfig {
+    /// Whether this config has any data.
+    #[must_use]
+    pub fn has_data(&self) -> bool {
+        self.enabled && (!self.entries.is_empty() || !self.files.is_empty())
+    }
+}
+
+/// A single inline hosts entry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HostsEntry {
+    /// Domain name (e.g., "example.com").
+    pub domain: String,
+    /// IP addresses for this domain.
+    pub ips: Vec<String>,
+}
+
+fn default_hosts_ttl() -> u32 {
+    60
+}
+
+// ─── Block config ─────────────────────────────────────────────────
+
+/// Domain block configuration.
+///
+/// Blocks DNS requests for matching domains by returning blackhole IPs
+/// or SOA negative responses.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct BlockConfig {
+    /// Whether domain blocking is enabled.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Exact domain names to block (e.g., ["ads.example.com"]).
+    #[serde(default)]
+    pub domains: Vec<String>,
+    /// Domain suffixes to block (e.g., ["doubleclick.net"]).
+    /// Matches any domain ending with the suffix.
+    #[serde(default)]
+    pub suffixes: Vec<String>,
+    /// Blackhole IPv4 address returned for blocked A queries.
+    #[serde(default = "default_blackhole_ipv4")]
+    pub blackhole_ipv4: String,
+    /// Blackhole IPv6 address returned for blocked AAAA queries.
+    #[serde(default = "default_blackhole_ipv6")]
+    pub blackhole_ipv6: String,
+    /// QTypes to fully suppress (return SOA / empty NOERROR).
+    /// E.g., ["HTTPS", "SRV"].
+    #[serde(default)]
+    pub suppress_qtypes: Vec<String>,
+}
+
+impl BlockConfig {
+    /// Whether this config has any block rules.
+    #[must_use]
+    pub fn has_rules(&self) -> bool {
+        self.enabled && (!self.domains.is_empty() || !self.suffixes.is_empty())
+    }
+}
+
+fn default_blackhole_ipv4() -> String {
+    "0.0.0.0".into()
+}
+
+fn default_blackhole_ipv6() -> String {
+    "::".into()
+}
+
+// ─── Blackhole HTTP config ────────────────────────────────────────
+
+/// Blackhole HTTP acceptor configuration.
+///
+/// Listens on specified HTTP ports and returns 202 Accepted for all
+/// requests. Used to consume HTTP traffic redirected by blackhole DNS
+/// responses, preventing connection hangs.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct BlackholeConfig {
+    /// Whether the blackhole HTTP acceptor is enabled.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Listen address (default: "0.0.0.0").
+    #[serde(default = "default_blackhole_listen")]
+    pub listen: String,
+    /// Ports to listen on (default: [80, 443]).
+    #[serde(default = "default_blackhole_ports")]
+    pub ports: Vec<u16>,
+    /// Maximum header bytes to read before discarding (default: 32768).
+    #[serde(default = "default_blackhole_max_header")]
+    pub max_header_bytes: usize,
+}
+
+fn default_blackhole_listen() -> String {
+    "0.0.0.0".into()
+}
+
+fn default_blackhole_ports() -> Vec<u16> {
+    vec![80, 443]
+}
+
+fn default_blackhole_max_header() -> usize {
+    32 * 1024
 }
 
 // ─── Legacy compatibility: ListenerAddr ────────────────────────────

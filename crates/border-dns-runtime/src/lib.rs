@@ -3,6 +3,7 @@
 //! Owns the UDP/TCP/DoT/DoH/DoJ DNS servers, bootstrap, and graceful shutdown.
 //! No reusable business logic should live here.
 
+pub mod blackhole;
 pub mod handler;
 pub mod server;
 
@@ -80,6 +81,17 @@ pub async fn run(config: Config, verbose: bool) -> anyhow::Result<()> {
     info!("BorderDNS runtime starting");
 
     let mut handles = Vec::new();
+
+    // Start blackhole HTTP acceptor (before DNS listeners).
+    if ctx.config.blackhole.enabled {
+        let blackhole = blackhole::BlackholeAcceptor::new(
+            ctx.config.blackhole.clone(),
+            Arc::clone(&ctx.shutdown),
+        );
+        if let Err(e) = blackhole.start().await {
+            tracing::error!(error = %e, "blackhole acceptor failed to start");
+        }
+    }
 
     // Start UDP listener.
     if let Some(ref udp) = ctx.config.listeners.udp {
