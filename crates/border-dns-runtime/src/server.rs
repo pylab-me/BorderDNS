@@ -809,8 +809,14 @@ fn load_tls_server_config(cert_file: &str, key_file: &str) -> anyhow::Result<rus
 }
 
 /// Load a rustls `ServerConfig` for DoH with HTTP ALPN negotiation.
+/// Reserved for Phase 4 (P1-4 DoH manual TLS migration from axum_server).
+#[allow(dead_code)]
 fn load_doh_tls_config(cert_file: &str, key_file: &str) -> anyhow::Result<rustls::ServerConfig> {
-    load_tls_config(cert_file, key_file, vec![b"h2".to_vec(), b"http/1.1".to_vec()])
+    load_tls_config(
+        cert_file,
+        key_file,
+        vec![b"h2".to_vec(), b"http/1.1".to_vec()],
+    )
 }
 
 /// Load a rustls `ServerConfig` from PEM certificate and key files
