@@ -11,6 +11,8 @@ pub mod server;
 use std::sync::Arc;
 
 use dns_transport::MetricsRegistry;
+use domain_knowledge::BlockMatcher;
+use domain_knowledge::HostsTable;
 use facts::FactEmitter;
 use facts::FactEventWriter;
 use facts::GovernanceStateStore;
@@ -32,6 +34,10 @@ pub struct RuntimeContext {
     pub metrics: Arc<MetricsRegistry>,
     /// Shutdown signal.
     pub shutdown: Arc<Notify>,
+    /// Domain block matcher.
+    pub block_matcher: Arc<BlockMatcher>,
+    /// Hosts override table.
+    pub hosts: Arc<HostsTable>,
 }
 
 impl RuntimeContext {
@@ -39,12 +45,85 @@ impl RuntimeContext {
     #[must_use]
     pub fn new(config: RuntimeConfig) -> Self {
         let cache = Arc::new(RouteScopedCache::new(config.cache.clone()));
+        let block_matcher = Arc::new(Self::build_block_matcher(&config));
+        let hosts = Arc::new(Self::build_hosts_table(&config));
         Self {
             config,
             cache,
             metrics: Arc::new(MetricsRegistry::default()),
             shutdown: Arc::new(Notify::new()),
+            block_matcher,
+            hosts,
         }
+    }
+
+    fn build_block_matcher(config: &RuntimeConfig) -> BlockMatcher {
+        let block_config = &config.block;
+        if !block_config.enabled {
+            return BlockMatcher::default();
+        }
+
+        let mut matcher = BlockMatcher::default();
+
+        // Exact domains.
+        let exact_refs: Vec<&str> = block_config.domains.iter().map(String::as_str).collect();
+        matcher.batch_add(&exact_refs);
+
+        // Suffixes → `**.{suffix}`.
+        let suffix_patterns: Vec<String> = block_config
+            .suffixes
+            .iter()
+            .map(|s| {
+                let bare = s.strip_suffix('.').unwrap_or(s);
+                format!("**.{bare}")
+            })
+            .collect();
+        let suffix_refs: Vec<&str> = suffix_patterns.iter().map(String::as_str).collect();
+        matcher.batch_add(&suffix_refs);
+
+        // Wildcard patterns.
+        let pattern_refs: Vec<&str> = block_config.patterns.iter().map(String::as_str).collect();
+        matcher.batch_add(&pattern_refs);
+
+        // External rule files.
+        for path_str in &block_config.rules_files {
+            let path = std::path::Path::new(path_str);
+            match matcher.load_rules_from_file(path) {
+                Ok(count) => {
+                    tracing::info!(
+                        rules_file = %path_str,
+                        rules_loaded = count,
+                        "Block rules loaded from file"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        rules_file = %path_str,
+                        error = %e,
+                        "Failed to load block rules file, skipping"
+                    );
+                }
+            }
+        }
+
+        matcher
+    }
+
+    fn build_hosts_table(config: &RuntimeConfig) -> HostsTable {
+        let hosts_config = &config.hosts;
+        if !hosts_config.enabled {
+            return HostsTable::new();
+        }
+        let mut builder = HostsTable::new();
+        for (domain, ips) in &hosts_config.entries {
+            for ip_str in ips {
+                builder = builder.with_entry(domain, ip_str);
+            }
+        }
+        for file_path in &hosts_config.files {
+            builder = builder.with_file(std::path::PathBuf::from(file_path));
+        }
+        builder.build()
     }
 }
 

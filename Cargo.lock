@@ -324,6 +324,7 @@ dependencies = [
  "axum-server",
  "border-dns-cache",
  "border-dns-config",
+ "border-dns-domain-knowledge",
  "border-dns-facts",
  "border-dns-pipeline",
  "border-dns-upstream",
