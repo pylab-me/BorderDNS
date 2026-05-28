@@ -292,7 +292,9 @@ name = "border-dns-probes"
 version = "0.4.0"
 dependencies = [
  "border-dns-facts",
+ "border-dns-geoip",
  "dns-types",
+ "futures",
  "serde",
  "serde_json",
  "tokio",

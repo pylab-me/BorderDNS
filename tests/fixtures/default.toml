@@ -105,3 +105,6 @@ enabled = false
 listen = "0.0.0.0"
 ports = [80, 443]
 max_header_bytes = 32768
+
+[speed_test]
+enabled = false
