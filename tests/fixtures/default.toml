@@ -93,7 +93,11 @@ ttl_secs = 60
 [block]
 enabled = false
 domains = []
-suffixes = []
+suffixes = ["doubleclick.net"]
+rules_files = [
+    "/tmp/blocklist.txt",
+    "/tmp/dns-hijack-list.txt",
+]
 blackhole_ipv4 = "0.0.0.0"
 blackhole_ipv6 = "::"
 # suppress_qtypes = ["HTTPS"]

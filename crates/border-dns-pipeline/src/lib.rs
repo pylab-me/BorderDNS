@@ -509,9 +509,52 @@ impl Pipeline {
         if !block_config.enabled {
             return BlockMatcher::default();
         }
+
+        // Merge all rule sources into the unified pattern trie.
+        let mut matcher = BlockMatcher::default();
+
+        // Exact domains → added as-is.
         let exact_refs: Vec<&str> = block_config.domains.iter().map(String::as_str).collect();
+        matcher.batch_add(&exact_refs);
+
+        // Suffixes → wrapped as `**.{suffix}`.
         let suffix_refs: Vec<&str> = block_config.suffixes.iter().map(String::as_str).collect();
-        BlockMatcher::new(&exact_refs, &suffix_refs)
+        let suffix_patterns: Vec<String> = suffix_refs
+            .iter()
+            .map(|s| {
+                let bare = s.strip_suffix('.').unwrap_or(s);
+                format!("**.{bare}")
+            })
+            .collect();
+        let suffix_pattern_refs: Vec<&str> = suffix_patterns.iter().map(String::as_str).collect();
+        matcher.batch_add(&suffix_pattern_refs);
+
+        // Wildcard patterns → added directly.
+        let pattern_refs: Vec<&str> = block_config.patterns.iter().map(String::as_str).collect();
+        matcher.batch_add(&pattern_refs);
+
+        // External rule files → loaded line by line, warn on failure.
+        for path_str in &block_config.rules_files {
+            let path = std::path::Path::new(path_str);
+            match matcher.load_rules_from_file(path) {
+                Ok(count) => {
+                    tracing::info!(
+                        rules_file = %path_str,
+                        rules_loaded = count,
+                        "Block rules loaded from file"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        rules_file = %path_str,
+                        error = %e,
+                        "Failed to load block rules file, skipping"
+                    );
+                }
+            }
+        }
+
+        matcher
     }
 
     // ─── Block response builder ──────────────────────────────────

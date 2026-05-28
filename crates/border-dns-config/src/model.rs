@@ -650,6 +650,16 @@ pub struct BlockConfig {
     /// Matches any domain ending with the suffix.
     #[serde(default)]
     pub suffixes: Vec<String>,
+    /// Wildcard pattern rules (e.g., ["**.umeng.**", "*.jddebug.com"]).
+    /// Supports `*` (single label glob), `**` (multi-label wildcard),
+    /// and exact matches. Merged with `domains` + `suffixes`.
+    #[serde(default)]
+    pub patterns: Vec<String>,
+    /// External rule file paths (one pattern per line, `#` = comment).
+    /// Rules from all files are merged into the unified pattern trie
+    /// alongside `domains` + `suffixes` + `patterns`.
+    #[serde(default)]
+    pub rules_files: Vec<String>,
     /// Blackhole IPv4 address returned for blocked A queries.
     #[serde(default = "default_blackhole_ipv4")]
     pub blackhole_ipv4: String,
@@ -666,7 +676,11 @@ impl BlockConfig {
     /// Whether this config has any block rules.
     #[must_use]
     pub fn has_rules(&self) -> bool {
-        self.enabled && (!self.domains.is_empty() || !self.suffixes.is_empty())
+        self.enabled
+            && (!self.domains.is_empty()
+                || !self.suffixes.is_empty()
+                || !self.patterns.is_empty()
+                || !self.rules_files.is_empty())
     }
 }
 

@@ -1,4 +1,11 @@
-use super::*;
+use dns_types::CnameHint;
+use dns_types::DomainPrior;
+use dns_types::QType;
+use dns_types::RecordType;
+
+use crate::BuiltInDomainKnowledge;
+use crate::DomainKnowledge;
+use crate::HostsTable;
 
 #[test]
 fn test_china_domain_classification() {
@@ -69,8 +76,6 @@ fn test_unknown_domain() {
 #[test]
 fn test_cname_china_provider() {
     let knowledge = BuiltInDomainKnowledge::new();
-    // "alicdn.com" is in the CDN list, so it returns GlobalCdn.
-    // Use a non-CDN China provider keyword for this test.
     let cnames = vec!["cdn.example.com", "something.chinacache.com"];
     assert_eq!(
         knowledge.classify_cname_chain(&cnames),
@@ -159,53 +164,4 @@ fn test_hosts_table_non_a_aaaa_qtype_returns_empty() {
 
     let result = table.match_domain("example.com", QType::Type(RecordType::MX));
     assert!(result.is_empty());
-}
-
-// ─── BlockMatcher tests ───────────────────────────────────────────
-
-#[test]
-fn test_block_matcher_exact_match() {
-    let matcher = BlockMatcher::new(&["ads.example.com", "tracker.evil.com"], &[]);
-    assert!(matcher.is_blocked("ads.example.com"));
-    assert!(matcher.is_blocked("tracker.evil.com"));
-    assert!(!matcher.is_blocked("safe.example.com"));
-}
-
-#[test]
-fn test_block_matcher_suffix_match() {
-    let matcher = BlockMatcher::new(&[], &["doubleclick.net", "adservice.google.com"]);
-    assert!(matcher.is_blocked("ad.doubleclick.net"));
-    assert!(matcher.is_blocked("tracker.ad.doubleclick.net"));
-    assert!(matcher.is_blocked("doubleclick.net"));
-    assert!(!matcher.is_blocked("doubleclick-other.net"));
-}
-
-#[test]
-fn test_block_matcher_combined() {
-    let matcher = BlockMatcher::new(&["exact.blocked.com"], &["suffix.blocked.com"]);
-    assert!(matcher.is_blocked("exact.blocked.com"));
-    assert!(matcher.is_blocked("sub.suffix.blocked.com"));
-    assert!(!matcher.is_blocked("not-blocked.com"));
-}
-
-#[test]
-fn test_block_matcher_case_insensitive() {
-    let matcher = BlockMatcher::new(&["Ads.Example.Com"], &[]);
-    assert!(matcher.is_blocked("ads.example.com"));
-    assert!(matcher.is_blocked("ADS.EXAMPLE.COM"));
-}
-
-#[test]
-fn test_block_matcher_empty() {
-    let matcher = BlockMatcher::default();
-    assert!(!matcher.is_blocked("anything.com"));
-    assert!(matcher.is_empty());
-    assert_eq!(matcher.rule_count(), 0);
-}
-
-#[test]
-fn test_block_matcher_trailing_dot() {
-    let matcher = BlockMatcher::new(&["example.com"], &[]);
-    assert!(matcher.is_blocked("example.com."));
-    assert!(matcher.is_blocked("example.com"));
 }

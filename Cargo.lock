@@ -201,7 +201,7 @@ checksum = "c4512299f36f043ab09a583e57bceb5a5aab7a73db1805848e8fef3c9e8c78b3"
 
 [[package]]
 name = "border-dns-cache"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "border-dns-config",
  "dashmap",
@@ -212,7 +212,7 @@ dependencies = [
 
 [[package]]
 name = "border-dns-cli"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "border-dns-cache",
@@ -232,7 +232,7 @@ dependencies = [
 
 [[package]]
 name = "border-dns-config"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "dns-types",
  "serde",
@@ -242,7 +242,7 @@ dependencies = [
 
 [[package]]
 name = "border-dns-domain-knowledge"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "dns-types",
  "serde",
@@ -250,7 +250,7 @@ dependencies = [
 
 [[package]]
 name = "border-dns-facts"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "chrono",
  "dashmap",
@@ -261,7 +261,7 @@ dependencies = [
 
 [[package]]
 name = "border-dns-geoip"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "dns-types",
  "serde",
@@ -269,7 +269,7 @@ dependencies = [
 
 [[package]]
 name = "border-dns-pipeline"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "border-dns-cache",
  "border-dns-config",
@@ -289,7 +289,7 @@ dependencies = [
 
 [[package]]
 name = "border-dns-probes"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "border-dns-facts",
  "border-dns-geoip",
@@ -304,7 +304,7 @@ dependencies = [
 
 [[package]]
 name = "border-dns-route-policy"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "border-dns-domain-knowledge",
  "border-dns-facts",
@@ -317,7 +317,7 @@ dependencies = [
 
 [[package]]
 name = "border-dns-runtime"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -345,7 +345,7 @@ dependencies = [
 
 [[package]]
 name = "border-dns-upstream"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "border-dns-config",
  "dashmap",
