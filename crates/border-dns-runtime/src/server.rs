@@ -9,6 +9,8 @@
 //! - Rebind retry: every server loop retries bind with exponential backoff
 //!   on socket-level failure, instead of silently exiting.
 //! - UDP receive buffer set to 256 KB for high-throughput scenarios.
+//! - Graceful shutdown: all server loops use `tokio::select!` against the
+//!   shared `Notify` so Ctrl+C terminates the process promptly.
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -35,6 +37,7 @@ use runtime_config::DoJListenerConfig;
 use runtime_config::TlsListenerConfig;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
+use tokio::sync::Notify;
 use tokio::time::timeout;
 use tracing::debug;
 use tracing::error;
@@ -55,9 +58,13 @@ const MIN_REBIND_BACKOFF: Duration = Duration::from_secs(1);
 /// Rebind loop: calls `bind_fn` in a retry loop with exponential backoff.
 /// Yields each successfully bound value to `on_ready` which runs the server
 /// loop. If the server loop returns (error or success), the bind is retried.
+///
+/// Returns `Ok(())` when the shutdown signal fires — this is the normal
+/// exit path during graceful shutdown.
 async fn rebind_loop<F, Fut, B, R, RFut>(
     name: &str,
     addr: &str,
+    shutdown: Arc<Notify>,
     mut bind_fn: F,
     mut on_ready: R,
 ) -> anyhow::Result<()>
@@ -70,40 +77,60 @@ where
     let mut backoff = MIN_REBIND_BACKOFF;
 
     loop {
-        match bind_fn().await {
-            Ok(bound) => {
-                backoff = MIN_REBIND_BACKOFF;
-                info!(address = %addr, "{name} server listening");
-                match on_ready(bound).await {
-                    Ok(()) => {
-                        warn!(address = %addr, "{name} server exited cleanly, rebinding");
+        tokio::select! {
+            biased;
+            _ = shutdown.notified() => {
+                info!("{name} server shutting down");
+                return Ok(());
+            }
+            result = bind_fn() => {
+                match result {
+                    Ok(bound) => {
+                        backoff = MIN_REBIND_BACKOFF;
+                        info!(address = %addr, "{name} server listening");
+                        match on_ready(bound).await {
+                            Ok(()) => {
+                                warn!(address = %addr, "{name} server exited cleanly, rebinding");
+                            }
+                            Err(e) => {
+                                error!(address = %addr, error = %e, "{name} server error, rebinding");
+                            }
+                        }
                     }
                     Err(e) => {
-                        error!(address = %addr, error = %e, "{name} server error, rebinding");
+                        error!(
+                            address = %addr,
+                            error = %e,
+                            backoff_secs = backoff.as_secs(),
+                            "{name} bind failed, retrying"
+                        );
                     }
                 }
             }
-            Err(e) => {
-                error!(
-                    address = %addr,
-                    error = %e,
-                    backoff_secs = backoff.as_secs(),
-                    "{name} bind failed, retrying"
-                );
-            }
         }
-        tokio::time::sleep(backoff).await;
+        tokio::select! {
+            biased;
+            _ = shutdown.notified() => {
+                info!("{name} server shutting down during backoff");
+                return Ok(());
+            }
+            _ = tokio::time::sleep(backoff) => {}
+        }
         backoff = (backoff * 2).min(MAX_REBIND_BACKOFF);
     }
 }
 
 // ─── Dual-stack socket helper ────────────────────────────────────
 
-/// Create a `socket2::Socket` bound to `addr` with dual-stack enabled.
+/// Create a `socket2::Socket` bound to `addr`.
 ///
-/// On IPv6 addresses, sets `IPV6_V6ONLY=0` so that `[::]` accepts both
-/// IPv4 and IPv6 connections (fixes Windows default of v6-only).
-fn bind_dual_stack_udp(addr: SocketAddr) -> std::io::Result<tokio::net::UdpSocket> {
+/// Dual-stack behavior depends on `ipv6_only`:
+/// - `None` (default): on IPv6 addresses, sets `IPV6_V6ONLY=0` (dual-stack).
+/// - `Some(true)`: `IPV6_V6ONLY=1` (IPv6-only, no IPv4 mapping).
+/// - `Some(false)`: same as `None` — dual-stack.
+///
+/// For IPv4 addresses this parameter is ignored.
+fn bind_udp(addr: SocketAddr, ipv6_only: Option<bool>) -> std::io::Result<tokio::net::UdpSocket> {
     use socket2::Protocol;
     use socket2::SockAddr;
     use socket2::Type;
@@ -115,7 +142,10 @@ fn bind_dual_stack_udp(addr: SocketAddr) -> std::io::Result<tokio::net::UdpSocke
     };
     let sock = socket2::Socket::new(domain, Type::DGRAM, Some(Protocol::UDP))?;
     if addr.is_ipv6() {
-        sock.set_only_v6(false)?;
+        // Default: dual-stack (IPV6_V6ONLY=0).
+        // ipv6_only=true → IPv6-only (IPV6_V6ONLY=1).
+        let only_v6 = ipv6_only.unwrap_or(false);
+        sock.set_only_v6(only_v6)?;
     }
     sock.set_reuse_address(true)?;
     sock.bind(&SockAddr::from(addr))?;
@@ -127,8 +157,10 @@ fn bind_dual_stack_udp(addr: SocketAddr) -> std::io::Result<tokio::net::UdpSocke
     tokio::net::UdpSocket::from_std(std_sock)
 }
 
-/// Create a `socket2::Socket` for TCP listening with dual-stack enabled.
-fn bind_dual_stack_tcp(addr: SocketAddr) -> std::io::Result<tokio::net::TcpListener> {
+/// Create a `socket2::Socket` for TCP listening.
+///
+/// Dual-stack behavior follows the same rules as `bind_udp`.
+fn bind_tcp(addr: SocketAddr, ipv6_only: Option<bool>) -> std::io::Result<tokio::net::TcpListener> {
     use socket2::Protocol;
     use socket2::SockAddr;
     use socket2::Type;
@@ -140,7 +172,8 @@ fn bind_dual_stack_tcp(addr: SocketAddr) -> std::io::Result<tokio::net::TcpListe
     };
     let sock = socket2::Socket::new(domain, Type::STREAM, Some(Protocol::TCP))?;
     if addr.is_ipv6() {
-        sock.set_only_v6(false)?;
+        let only_v6 = ipv6_only.unwrap_or(false);
+        sock.set_only_v6(only_v6)?;
     }
     sock.set_reuse_address(true)?;
     sock.set_tcp_nodelay(true)?;
@@ -156,38 +189,55 @@ fn bind_dual_stack_tcp(addr: SocketAddr) -> std::io::Result<tokio::net::TcpListe
 
 /// Run a UDP DNS server on the given address.
 ///
-/// Uses `socket2` for dual-stack IPv6 (IPV6_V6ONLY=0). If the socket
-/// errors out (e.g. after Windows hibernation), automatically rebinds
-/// with exponential backoff.
+/// Uses `socket2` for dual-stack IPv6. If the socket errors out
+/// (e.g. after Windows hibernation), automatically rebinds with
+/// exponential backoff. Exits cleanly on shutdown signal.
 pub async fn run_udp(addr: String, ctx: Arc<RuntimeContext>) -> anyhow::Result<()> {
     let sock_addr: SocketAddr = addr
         .parse()
         .map_err(|e| anyhow::anyhow!("invalid UDP listen address '{addr}': {e}"))?;
 
+    // Read ipv6_only from config (if present).
+    let ipv6_only = ctx.config.listeners.udp.as_ref().and_then(|u| u.ipv6_only);
+
+    let shutdown = Arc::clone(&ctx.shutdown);
+
     rebind_loop(
         "UDP",
         &addr,
+        Arc::clone(&shutdown),
         || {
             let addr = sock_addr;
+            let ipv6_only = ipv6_only;
             async move {
-                bind_dual_stack_udp(addr).map_err(|e| anyhow::anyhow!("UDP bind '{addr}': {e}"))
+                bind_udp(addr, ipv6_only).map_err(|e| anyhow::anyhow!("UDP bind '{addr}': {e}"))
             }
         },
         |socket| {
             let ctx = Arc::clone(&ctx);
+            let shutdown = Arc::clone(&shutdown);
             async move {
                 let socket = Arc::new(socket);
-                let mut buf = [0u8; 4096]; // stack-allocated, reused across iterations (P1-5)
+                let mut buf = [0u8; 4096]; // stack-allocated, reused across iterations
                 loop {
                     let sock = Arc::clone(&socket);
                     let ctx = Arc::clone(&ctx);
 
-                    let (len, peer) = match sock.recv_from(&mut buf).await {
-                        Ok(v) => v,
-                        Err(e) => {
-                            // Fatal socket error → return Err to trigger rebind.
-                            error!(error = %e, "UDP recv fatal error, rebinding");
-                            return Err(e.into());
+                    // Race recv_from against shutdown signal.
+                    let (len, peer) = tokio::select! {
+                        biased;
+                        _ = shutdown.notified() => {
+                            info!("UDP server loop shutting down");
+                            return Ok(());
+                        }
+                        result = sock.recv_from(&mut buf) => {
+                            match result {
+                                Ok(v) => v,
+                                Err(e) => {
+                                    error!(error = %e, "UDP recv fatal error, rebinding");
+                                    return Err(e.into());
+                                }
+                            }
                         }
                     };
                     let query = buf[..len].to_vec();
@@ -212,27 +262,44 @@ pub async fn run_udp(addr: String, ctx: Arc<RuntimeContext>) -> anyhow::Result<(
 
 /// Run a TCP DNS server on the given address.
 ///
-/// Uses dual-stack socket with rebind retry.
+/// Uses dual-stack socket with rebind retry. Exits cleanly on shutdown signal.
 pub async fn run_tcp(addr: String, ctx: Arc<RuntimeContext>) -> anyhow::Result<()> {
     let sock_addr: SocketAddr = addr
         .parse()
         .map_err(|e| anyhow::anyhow!("invalid TCP listen address '{addr}': {e}"))?;
 
+    let ipv6_only = ctx.config.listeners.tcp.as_ref().and_then(|t| t.ipv6_only);
+
+    let shutdown = Arc::clone(&ctx.shutdown);
+
     rebind_loop(
         "TCP",
         &addr,
+        Arc::clone(&shutdown),
         || {
             let addr = sock_addr;
+            let ipv6_only = ipv6_only;
             async move {
-                bind_dual_stack_tcp(addr).map_err(|e| anyhow::anyhow!("TCP bind '{addr}': {e}"))
+                bind_tcp(addr, ipv6_only).map_err(|e| anyhow::anyhow!("TCP bind '{addr}': {e}"))
             }
         },
         |listener| {
             let ctx = Arc::clone(&ctx);
+            let shutdown = Arc::clone(&shutdown);
             async move {
                 let timeout_dur = Duration::from_millis(ctx.config.server.default_timeout_ms);
                 loop {
-                    let (stream, peer) = listener.accept().await?;
+                    // Race accept against shutdown signal.
+                    let (stream, peer) = tokio::select! {
+                        biased;
+                        _ = shutdown.notified() => {
+                            info!("TCP server loop shutting down");
+                            return Ok(());
+                        }
+                        result = listener.accept() => {
+                            result?
+                        }
+                    };
                     let ctx = Arc::clone(&ctx);
 
                     tokio::spawn(async move {
@@ -257,7 +324,7 @@ async fn handle_tcp_connection(
     timeout_dur: Duration,
 ) -> anyhow::Result<()> {
     let mut decoder = tcp_frame::TcpFrameDecoder::new();
-    let mut buf = [0u8; 4096]; // stack-allocated, reused across iterations (P1-6)
+    let mut buf = [0u8; 4096]; // stack-allocated, reused across iterations
 
     loop {
         let n = match timeout(timeout_dur, stream.read(&mut buf)).await {
@@ -299,7 +366,7 @@ async fn handle_tcp_connection(
 /// Run a DNS-over-TLS server.
 ///
 /// DoT = TLS stream + DNS-over-TCP framing (2-byte length prefix).
-/// Uses dual-stack TCP socket with rebind retry.
+/// Uses dual-stack TCP socket with rebind retry. Exits on shutdown signal.
 pub async fn run_dot(cfg: TlsListenerConfig, ctx: Arc<RuntimeContext>) -> anyhow::Result<()> {
     let tls_config = load_tls_server_config(&cfg.cert_file, &cfg.key_file)?;
     let tls_config = Arc::new(tls_config);
@@ -308,22 +375,37 @@ pub async fn run_dot(cfg: TlsListenerConfig, ctx: Arc<RuntimeContext>) -> anyhow
         .parse()
         .map_err(|e| anyhow::anyhow!("invalid DoT listen address '{}': {}", cfg.listen, e))?;
 
+    let ipv6_only = cfg.ipv6_only;
+    let shutdown = Arc::clone(&ctx.shutdown);
+
     rebind_loop(
         "DoT",
         &cfg.listen,
+        Arc::clone(&shutdown),
         || {
             let addr = sock_addr;
+            let ipv6_only = ipv6_only;
             async move {
-                bind_dual_stack_tcp(addr).map_err(|e| anyhow::anyhow!("DoT bind '{addr}': {e}"))
+                bind_tcp(addr, ipv6_only).map_err(|e| anyhow::anyhow!("DoT bind '{addr}': {e}"))
             }
         },
         |listener| {
             let ctx = Arc::clone(&ctx);
             let tls_config = Arc::clone(&tls_config);
             let idle_timeout = Duration::from_millis(cfg.idle_timeout_ms);
+            let shutdown = Arc::clone(&shutdown);
             async move {
                 loop {
-                    let (stream, peer) = listener.accept().await?;
+                    let (stream, peer) = tokio::select! {
+                        biased;
+                        _ = shutdown.notified() => {
+                            info!("DoT server loop shutting down");
+                            return Ok(());
+                        }
+                        result = listener.accept() => {
+                            result?
+                        }
+                    };
                     let ctx = Arc::clone(&ctx);
                     let tls_config = Arc::clone(&tls_config);
 
@@ -442,6 +524,8 @@ pub async fn run_doh(cfg: DoHListenerConfig, ctx: Arc<RuntimeContext>) -> anyhow
 
     info!(address = %cfg.listen, path = %cfg.path, "DoH server listening");
 
+    // axum_server does not support graceful shutdown directly via Notify.
+    // The process exit from Ctrl+C will terminate the listener.
     axum_server::bind_rustls(addr, tls_config)
         .serve(app.into_make_service())
         .await
@@ -551,7 +635,7 @@ struct DoJAnswer {
 /// GET /resolve?name=example.com&type=A
 /// ```
 ///
-/// Uses dual-stack TCP socket with rebind retry.
+/// Uses dual-stack TCP socket with rebind retry. Exits on shutdown signal.
 ///
 /// # Errors
 ///
@@ -563,19 +647,25 @@ pub async fn run_doj(cfg: DoJListenerConfig, ctx: Arc<RuntimeContext>) -> anyhow
         .parse()
         .map_err(|e| anyhow::anyhow!("invalid DoJ listen address '{}': {}", cfg.listen, e))?;
 
+    let ipv6_only = cfg.ipv6_only;
+    let shutdown = Arc::clone(&ctx.shutdown);
+
     rebind_loop(
         "DoJ",
         &cfg.listen,
+        Arc::clone(&shutdown),
         || {
             let addr = sock_addr;
+            let ipv6_only = ipv6_only;
             async move {
-                bind_dual_stack_tcp(addr).map_err(|e| anyhow::anyhow!("DoJ bind '{addr}': {e}"))
+                bind_tcp(addr, ipv6_only).map_err(|e| anyhow::anyhow!("DoJ bind '{addr}': {e}"))
             }
         },
         |listener| {
             let ctx = Arc::clone(&ctx);
             let path = path.clone();
             let profile = cfg.profile.clone();
+            let shutdown = Arc::clone(&shutdown);
             async move {
                 let app = Router::new()
                     .route(&path, get(doj_resolve_handler))
@@ -587,9 +677,17 @@ pub async fn run_doj(cfg: DoJListenerConfig, ctx: Arc<RuntimeContext>) -> anyhow
                     "DoJ handler registered"
                 );
 
-                axum::serve(listener, app.into_make_service())
-                    .await
-                    .map_err(|e| anyhow::anyhow!("DoJ server error: {e}"))
+                // Race the axum server against shutdown.
+                tokio::select! {
+                    biased;
+                    _ = shutdown.notified() => {
+                        info!("DoJ server shutting down");
+                        Ok(())
+                    }
+                    result = axum::serve(listener, app.into_make_service()) => {
+                        result.map_err(|e| anyhow::anyhow!("DoJ server error: {e}"))
+                    }
+                }
             }
         },
     )

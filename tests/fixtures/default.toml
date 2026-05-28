@@ -9,10 +9,12 @@ max_concurrent = 1024
 [listeners.udp]
 enabled = true
 listen = "0.0.0.0:5353"
+# ipv6_only = true   # set to true for IPv6-only on [::]; default = dual-stack
 
 [listeners.tcp]
 enabled = false
 listen = "0.0.0.0:5353"
+# ipv6_only = true
 
 # Default group (fallback for bootstrap / fallback routes)
 [[upstreams.default]]
@@ -100,7 +102,7 @@ rules_files = [
 ]
 blackhole_ipv4 = "0.0.0.0"
 blackhole_ipv6 = "::"
-# suppress_qtypes = ["HTTPS"]
+suppress_qtypes = ["HTTPS", "AAAA"]
 
 # ─── Blackhole HTTP ───────────────────────────────────────────────
 # HTTP listener returning 202 Accepted on redirect ports.

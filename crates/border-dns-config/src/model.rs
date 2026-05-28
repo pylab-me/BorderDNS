@@ -207,6 +207,13 @@ pub struct UdpListenerConfig {
     /// Socket address (e.g., "0.0.0.0:5353").
     #[serde(default = "default_udp_listen")]
     pub listen: String,
+    /// IPv6-only mode.
+    /// - `None` (default): dual-stack — `[::]` accepts both IPv4 and IPv6.
+    /// - `Some(true)`: IPv6-only — `[::]` accepts IPv6 only.
+    /// - `Some(false)`: same as `None` (dual-stack).
+    /// Ignored when `listen` is an IPv4 address.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ipv6_only: Option<bool>,
 }
 
 impl Default for UdpListenerConfig {
@@ -214,6 +221,7 @@ impl Default for UdpListenerConfig {
         Self {
             enabled: default_enabled(),
             listen: default_udp_listen(),
+            ipv6_only: None,
         }
     }
 }
@@ -226,6 +234,9 @@ pub struct TcpListenerConfig {
     /// Socket address (e.g., "0.0.0.0:5353").
     #[serde(default = "default_tcp_listen")]
     pub listen: String,
+    /// IPv6-only mode. See [`UdpListenerConfig::ipv6_only`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ipv6_only: Option<bool>,
 }
 
 impl Default for TcpListenerConfig {
@@ -233,6 +244,7 @@ impl Default for TcpListenerConfig {
         Self {
             enabled: false,
             listen: default_tcp_listen(),
+            ipv6_only: None,
         }
     }
 }
@@ -251,6 +263,9 @@ pub struct TlsListenerConfig {
     /// Connection idle timeout in milliseconds (default: 30000).
     #[serde(default = "default_idle_timeout_ms")]
     pub idle_timeout_ms: u64,
+    /// IPv6-only mode. See [`UdpListenerConfig::ipv6_only`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ipv6_only: Option<bool>,
 }
 
 /// DNS-over-HTTPS listener configuration.
@@ -307,6 +322,9 @@ pub struct DoJListenerConfig {
     /// Profile: "borderdns" or "google-compat".
     #[serde(default = "default_doj_profile")]
     pub profile: String,
+    /// IPv6-only mode. See [`UdpListenerConfig::ipv6_only`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ipv6_only: Option<bool>,
 }
 
 // ─── Upstream config ──────────────────────────────────────────────

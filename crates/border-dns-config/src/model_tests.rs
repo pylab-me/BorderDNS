@@ -305,6 +305,7 @@ fn test_config_serialize_roundtrip() {
             udp: Some(UdpListenerConfig {
                 enabled: true,
                 listen: "0.0.0.0:5353".into(),
+                ipv6_only: None,
             }),
             ..ListenersConfig::default()
         },

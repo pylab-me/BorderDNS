@@ -559,19 +559,39 @@ impl Pipeline {
 
     // ─── Block response builder ──────────────────────────────────
 
+    /// Build a block response for a blocked domain query.
+    ///
+    /// Behavior:
+    /// 1. If `qtype` is in `suppress_qtypes`, return SOA (fully suppressed).
+    /// 2. A → blackhole IPv4, AAAA → blackhole IPv6.
+    /// 3. All other types → SOA negative response.
     fn build_block_response(
         &self,
         query: &DnsMessage,
         qtype: QType,
         domain: &dns_protocol::name::DomainName,
     ) -> DnsMessage {
-        use dns_protocol::header::ResponseCode;
         use dns_protocol::rr::RData;
         use dns_protocol::rr::ResourceRecord;
         use dns_types::RecordType;
 
         let mut resp = DnsMessage::response(query);
 
+        // ── suppress_qtypes: if the qtype name matches, return SOA directly ──
+        let qtype_suppressed = qtype.as_record_type().is_some_and(|rt| {
+            let name = rt.as_str();
+            self.config
+                .block
+                .suppress_qtypes
+                .iter()
+                .any(|s| s.eq_ignore_ascii_case(name))
+        });
+
+        if qtype_suppressed {
+            return build_soa_suppress_response(&mut resp, domain);
+        }
+
+        // ── Standard blackhole response ──
         let blackhole_v4: std::net::Ipv4Addr = self
             .config
             .block
@@ -605,30 +625,46 @@ impl Pipeline {
                 });
             }
             _ => {
-                // Suppress: return SOA negative response.
-                resp.header.rcode = ResponseCode::NoError;
-                let soa_name = dns_protocol::name::DomainName::from_str("block.borderdns.local")
-                    .unwrap_or_else(|_| dns_protocol::name::DomainName::root());
-                resp.add_authority(ResourceRecord {
-                    name: domain.clone(),
-                    rr_type: RecordType::SOA,
-                    class: dns_types::RecordClass::In,
-                    ttl: 60,
-                    rdata: RData::SOA(dns_protocol::rr::SoaRecord {
-                        mname: soa_name.clone(),
-                        rname: soa_name,
-                        serial: 1,
-                        refresh: 900,
-                        retry: 900,
-                        expire: 1800,
-                        minimum: 60,
-                    }),
-                });
+                return build_soa_suppress_response(&mut resp, domain);
             }
         }
 
         resp
     }
+}
+
+/// Build a SOA negative (suppress) response for a blocked domain.
+///
+/// Returns a copy of `resp` with a SOA authority record added and `rcode = NOERROR`.
+fn build_soa_suppress_response(
+    resp: &DnsMessage,
+    domain: &dns_protocol::name::DomainName,
+) -> DnsMessage {
+    use dns_protocol::header::ResponseCode;
+    use dns_protocol::rr::RData;
+    use dns_protocol::rr::ResourceRecord;
+    use dns_types::RecordType;
+
+    let mut out = DnsMessage::response(resp);
+    out.header.rcode = ResponseCode::NoError;
+    let soa_name = dns_protocol::name::DomainName::from_str("block.borderdns.local")
+        .unwrap_or_else(|_| dns_protocol::name::DomainName::root());
+    out.add_authority(ResourceRecord {
+        name: domain.clone(),
+        rr_type: RecordType::SOA,
+        class: dns_types::RecordClass::In,
+        ttl: 60,
+        rdata: RData::SOA(dns_protocol::rr::SoaRecord {
+            mname: soa_name.clone(),
+            rname: soa_name,
+            serial: 1,
+            refresh: 900,
+            retry: 900,
+            expire: 1800,
+            minimum: 60,
+        }),
+    });
+    out
 }
 
 /// Build a minimal malformed-request response.
