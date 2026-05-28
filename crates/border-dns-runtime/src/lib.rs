@@ -80,6 +80,13 @@ pub fn init_tracing(verbose: bool) -> anyhow::Result<()> {
 ///
 /// Returns error on server startup failure.
 pub async fn run(config: RuntimeConfig, verbose: bool) -> anyhow::Result<()> {
+    // Install the ring crypto provider for rustls before any TLS operations.
+    // With `default-features = false` + `features = ["ring"]`, rustls does not
+    // auto-install a provider. Without this call, the first TLS handshake panics.
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok(); // ok() ignores "already installed" error
+
     init_tracing(verbose)?;
 
     let ctx = Arc::new(RuntimeContext::new(config));

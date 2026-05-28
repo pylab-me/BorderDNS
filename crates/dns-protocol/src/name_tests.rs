@@ -191,7 +191,7 @@ fn test_compression_roundtrip() {
     let name2 = DomainName::from_str("mail.example.com").unwrap();
 
     let mut writer = WireWriter::new();
-    let mut compression_map = HashMap::new();
+    let mut compression_map: HashMap<u64, usize> = HashMap::new();
 
     write_name_compressed(&name1, &mut writer, &mut compression_map);
     let name2_offset = writer.pos();

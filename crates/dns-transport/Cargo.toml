@@ -1,5 +1,6 @@
 [package]
 name = "dns-transport"
+# TO[AI]: when update the code in this package, please add the mini version.
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true

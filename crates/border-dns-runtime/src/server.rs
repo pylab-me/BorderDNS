@@ -177,8 +177,8 @@ pub async fn run_udp(addr: String, ctx: Arc<RuntimeContext>) -> anyhow::Result<(
             let ctx = Arc::clone(&ctx);
             async move {
                 let socket = Arc::new(socket);
+                let mut buf = [0u8; 4096]; // stack-allocated, reused across iterations (P1-5)
                 loop {
-                    let mut buf = vec![0u8; 4096];
                     let sock = Arc::clone(&socket);
                     let ctx = Arc::clone(&ctx);
 
@@ -190,13 +190,13 @@ pub async fn run_udp(addr: String, ctx: Arc<RuntimeContext>) -> anyhow::Result<(
                             return Err(e.into());
                         }
                     };
-                    buf.truncate(len);
+                    let query = buf[..len].to_vec();
 
                     ctx.metrics.udp.record_request();
 
                     tokio::spawn(async move {
                         let meta = RequestMeta::new(TransportKind::Udp, Some(peer));
-                        let resp = handler::handle_dns_query(&buf, &ctx, &meta).await;
+                        let resp = handler::handle_dns_query(&query, &ctx, &meta).await;
                         if let Err(e) = sock.send_to(resp.wire(), peer).await {
                             debug!(error = %e, peer = %peer, "UDP send error");
                         }
@@ -257,9 +257,9 @@ async fn handle_tcp_connection(
     timeout_dur: Duration,
 ) -> anyhow::Result<()> {
     let mut decoder = tcp_frame::TcpFrameDecoder::new();
+    let mut buf = [0u8; 4096]; // stack-allocated, reused across iterations (P1-6)
 
     loop {
-        let mut buf = vec![0u8; 4096];
         let n = match timeout(timeout_dur, stream.read(&mut buf)).await {
             Ok(Ok(0)) => return Ok(()),
             Ok(Ok(n)) => n,
@@ -357,9 +357,9 @@ async fn handle_tls_connection(
         .map_err(|e| anyhow::anyhow!("TLS handshake failed: {e}"))?;
 
     let mut decoder = tcp_frame::TcpFrameDecoder::new();
+    let mut buf = [0u8; 4096];
 
     loop {
-        let mut buf = vec![0u8; 4096];
         let n = match timeout(idle_timeout, tls_stream.read(&mut buf)).await {
             Ok(Ok(0)) => return Ok(()),
             Ok(Ok(n)) => n,
@@ -803,7 +803,23 @@ fn format_rr_data(rr: &dns_protocol::rr::ResourceRecord) -> String {
 // ─── TLS Helpers ──────────────────────────────────────────────────
 
 /// Load a rustls `ServerConfig` from PEM certificate and key files.
+/// Uses `dns` ALPN for DoT (RFC 7858).
 fn load_tls_server_config(cert_file: &str, key_file: &str) -> anyhow::Result<rustls::ServerConfig> {
+    load_tls_config(cert_file, key_file, vec![b"dns".to_vec()])
+}
+
+/// Load a rustls `ServerConfig` for DoH with HTTP ALPN negotiation.
+fn load_doh_tls_config(cert_file: &str, key_file: &str) -> anyhow::Result<rustls::ServerConfig> {
+    load_tls_config(cert_file, key_file, vec![b"h2".to_vec(), b"http/1.1".to_vec()])
+}
+
+/// Load a rustls `ServerConfig` from PEM certificate and key files
+/// with configurable ALPN protocols.
+fn load_tls_config(
+    cert_file: &str,
+    key_file: &str,
+    alpn_protocols: Vec<Vec<u8>>,
+) -> anyhow::Result<rustls::ServerConfig> {
     let cert_data = std::fs::read(cert_file)
         .map_err(|e| anyhow::anyhow!("failed to read TLS cert '{cert_file}': {e}"))?;
     let key_data = std::fs::read(key_file)
@@ -827,8 +843,7 @@ fn load_tls_server_config(cert_file: &str, key_file: &str) -> anyhow::Result<rus
         .with_single_cert(cert_chain, key_der)
         .map_err(|e| anyhow::anyhow!("TLS config error: {e}"))?;
 
-    // Set ALPN for DoT.
-    config.alpn_protocols = vec![b"dns".to_vec()];
+    config.alpn_protocols = alpn_protocols;
 
     Ok(config)
 }

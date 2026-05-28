@@ -1,5 +1,6 @@
 [package]
 name = "dns-protocol"
+# TO[AI]: when update the code in this package, please add the mini version.
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
@@ -11,6 +12,7 @@ description = "DNS protocol wire codec: message decode/encode, name compression,
 dns-types.workspace = true
 thiserror.workspace = true
 bytes.workspace = true
+smallvec.workspace = true
 
 [lints]
 workspace = true

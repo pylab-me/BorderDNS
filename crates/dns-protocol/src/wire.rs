@@ -4,6 +4,7 @@
 //! integers are read in network byte order (big-endian) per RFC 1035.
 
 use dns_types::ProtocolError;
+use smallvec::SmallVec;
 
 // Maximum depth for compression pointer chains (referenced by name module).
 
@@ -16,7 +17,8 @@ pub struct WireReader<'a> {
     buf: &'a [u8],
     pos: usize,
     /// Saved positions for backtracking (e.g., RDATA boundary).
-    saved_pos: Vec<usize>,
+    /// SmallVec avoids heap allocation for typical 1–2 level nesting.
+    saved_pos: SmallVec<[usize; 4]>,
 }
 
 impl<'a> WireReader<'a> {
@@ -26,7 +28,7 @@ impl<'a> WireReader<'a> {
         Self {
             buf,
             pos: 0,
-            saved_pos: Vec::new(),
+            saved_pos: SmallVec::new(),
         }
     }
 

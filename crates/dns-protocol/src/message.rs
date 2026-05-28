@@ -126,11 +126,34 @@ impl DnsMessage {
     }
 
     /// Encode this message to wire format.
+    ///
+    /// Pre-allocates capacity based on estimated wire size to avoid mid-encode
+    /// reallocation (P2-1 fix).
     #[must_use]
     pub fn to_wire(&self) -> Vec<u8> {
-        let mut writer = WireWriter::with_capacity(512);
+        let cap = self.wire_size_estimate();
+        let mut writer = WireWriter::with_capacity(cap);
         self.write_to(&mut writer);
         writer.into_bytes()
+    }
+
+    /// Estimate the wire-format size of this message for pre-allocation.
+    fn wire_size_estimate(&self) -> usize {
+        let mut size = 12; // header
+        for q in &self.questions {
+            size += q.wire_len();
+        }
+        // RRs: rough estimate — name wire len + 10 (type+class+ttl+rdlen) + avg rdata
+        for rr in &self.answers {
+            size += rr.name.wire_len() + 10 + 64; // 64 = avg rdata size
+        }
+        for rr in &self.authorities {
+            size += rr.name.wire_len() + 10 + 64;
+        }
+        for rr in &self.additionals {
+            size += rr.name.wire_len() + 10 + 64;
+        }
+        size.max(512)
     }
 
     /// Write this message to the given writer.
